@@ -1,0 +1,358 @@
+{
+  "users": [
+    {
+      "id": "1",
+      "name": "Super Admin",
+      "email": "superadmin@hospital.com",
+      "password": "123",
+      "role": "superadmin"
+    },
+    {
+      "id": "2",
+      "name": "Hospital Admin",
+      "email": "admin@hospital.com",
+      "password": "123",
+      "role": "admin",
+      "hospitalId": "h1",
+      "hospital": "Sham Nursing Home"
+    },
+    {
+      "id": "3",
+      "name": "John Doe",
+      "email": "user@hospital.com",
+      "password": "123",
+      "role": "user"
+    },
+    {
+      "id": "1784600280998",
+      "name": "Abhi",
+      "email": "abhi@gmail.com",
+      "password": "123",
+      "role": "admin",
+      "hospital": "Moga Medicity",
+      "hospitalId": ""
+    },
+    {
+      "id": "1784601798087",
+      "name": "Hans",
+      "email": "hans@gmail.com",
+      "password": "123",
+      "role": "user"
+    },
+    {
+      "id": "1784614682715",
+      "name": "Sham Nursing Home",
+      "email": "Sham@gmail.com",
+      "password": "123",
+      "role": "admin",
+      "hospital": "Sham Nursing Home",
+      "hospitalId": ""
+    },
+    {
+      "id": "1784694256673",
+      "name": "xa",
+      "email": "adminm@hospital.com",
+      "password": "123",
+      "role": "user"
+    },
+    {
+      "id": "1784772495067",
+      "name": "Dr. Avinash",
+      "email": "Sohanaadmin@hospital.com",
+      "password": "123",
+      "role": "admin",
+      "hospital": "Sohana Hospital",
+      "hospitalId": "1784772495066"
+    },
+    {
+      "id": "1784777379721",
+      "name": "test",
+      "email": "test@gmail.com",
+      "password": "123",
+      "role": "admin",
+      "hospital": "test",
+      "hospitalId": "1784777379720"
+    }
+  ],
+  "hospitals": [
+    {
+      "id": "h2",
+      "name": "Medpark City Center",
+      "location": "Sector 17, Chandigarh",
+      "beds": "250+",
+      "contact": "+91 91234 56789"
+    },
+    {
+      "id": "h3",
+      "name": "Delhi Heart Moga",
+      "location": "Moga, Punjab",
+      "beds": "300+",
+      "contact": "+91 91225-56789"
+    },
+    {
+      "id": "1784772495066",
+      "name": "Sohana Hospital",
+      "location": "Mohali ",
+      "icu": "24/7 ICU",
+      "careType": "Advanced Care",
+      "specialty": "Super Specialty",
+      "beds": "300+",
+      "timings": "Mon - Sat • 8:00 AM - 8:00 PM",
+      "contact": "+91 91225-56789",
+      "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "email": "Sohanaadmin@hospital.com",
+      "createdAt": "2026-07-23T02:08:15.066Z"
+    },
+    {
+      "id": "1784777379720",
+      "name": "test",
+      "location": "test",
+      "icu": "24/7 ICU",
+      "careType": "Advanced Care",
+      "specialty": "Super Specialty",
+      "beds": "300+",
+      "contact": "+91 91225-56789",
+      "videoUrl": "",
+      "email": "test@gmail.com",
+      "createdAt": "2026-07-23T03:29:39.720Z"
+    }
+  ],
+  "appointments": [
+    {
+      "id": "1784560394369",
+      "userId": "3",
+      "hospitalId": "h1",
+      "doctorName": "Any Available Doctor",
+      "date": "2026-07-01",
+      "time": "22:10",
+      "patientName": "Abhinash",
+      "patientPhone": "9814538354",
+      "reason": "TEST",
+      "status": "In Progress",
+      "createdAt": "2026-07-20T15:13:14.369Z",
+      "updatedAt": "2026-07-23T06:12:00.508Z"
+    },
+    {
+      "id": "1784601221504",
+      "userId": "3",
+      "hospitalId": "h1",
+      "doctorName": "Any Available Doctor",
+      "date": "2026-07-21",
+      "time": "10:00",
+      "patientName": "HANSRAJ",
+      "patientPhone": "9814538354",
+      "reason": "TEST",
+      "status": "Completed",
+      "createdAt": "2026-07-21T02:33:41.504Z",
+      "updatedAt": "2026-07-23T06:51:27.293Z"
+    },
+    {
+      "id": "1784781352281",
+      "userId": "3",
+      "hospitalId": "1784772495066",
+      "doctorName": "Any Available Doctor",
+      "date": "2026-07-24",
+      "time": "03:05",
+      "patientName": "kANIKA",
+      "patientPhone": "9814538354",
+      "reason": "TEST",
+      "status": "Cancelled",
+      "createdAt": "2026-07-23T04:35:52.281Z",
+      "updatedAt": "2026-07-23T06:28:04.932Z"
+    },
+    {
+      "id": "1784781978179",
+      "userId": "3",
+      "hospitalId": "1784777379720",
+      "hospitalName": "test",
+      "doctorName": "Any Available Doctor",
+      "date": "2026-07-24",
+      "time": "10:21",
+      "patientName": "abhi",
+      "patientPhone": "9814538354",
+      "reason": "FEVER",
+      "status": "Pending",
+      "createdAt": "2026-07-23T04:46:18.179Z"
+    },
+    {
+      "id": "1785000000001",
+      "userId": "3",
+      "hospitalId": "h2",
+      "doctorName": "Dr. Sharma",
+      "date": "2026-09-20",
+      "time": "08:00",
+      "patientName": "Samantha Docker",
+      "patientPhone": "2262411797",
+      "reason": "General Checkup",
+      "petName": "Luna Junior",
+      "species": "Cat / 651",
+      "appointmentType": "Consult",
+      "status": "Completed",
+      "createdAt": "2026-07-23T05:00:00.000Z"
+    },
+    {
+      "id": "1785000000002",
+      "userId": "3",
+      "hospitalId": "h2",
+      "doctorName": "Dr. Mehta",
+      "date": "2026-07-29",
+      "time": "09:00",
+      "patientName": "Emma Norton",
+      "patientPhone": "5712067552",
+      "reason": "Follow up",
+      "petName": "Timmy",
+      "species": "Cat /",
+      "appointmentType": "Consult",
+      "status": "Confirmed",
+      "createdAt": "2026-07-23T05:01:00.000Z",
+      "updatedAt": "2026-07-23T06:05:03.571Z"
+    },
+    {
+      "id": "1784789452621",
+      "userId": "2",
+      "hospitalId": "1784777379720",
+      "doctorName": "Any Available Doctor",
+      "date": "2026-07-25",
+      "time": "16:24",
+      "patientName": "Abhimash",
+      "patientPhone": "9814538354",
+      "reason": "Eye checkup.",
+      "petName": "",
+      "species": "",
+      "appointmentType": "Consult",
+      "status": "In Progress",
+      "createdAt": "2026-07-23T06:50:52.622Z",
+      "updatedAt": "2026-07-23T08:20:44.615Z"
+    }
+  ],
+  "contacts": [
+    {
+      "id": "1784603308803",
+      "name": "abhi",
+      "email": "abhi@gmail.com",
+      "subject": "Want to book a appointment",
+      "phone": "9814538354",
+      "message": "Want to book a appointment.",
+      "submittedAt": "2026-07-21T03:08:28.803Z"
+    },
+    {
+      "id": "1784704889063",
+      "name": "vishal prajajpati",
+      "email": "test@gmail.com",
+      "subject": "3445",
+      "phone": "7018005506",
+      "message": "qwerty",
+      "submittedAt": "2026-07-22T07:21:29.063Z"
+    }
+  ],
+  "feedbacks": [
+    {
+      "id": "1784781366834",
+      "userId": "3",
+      "userName": "John Doe",
+      "hospitalId": "1784777379720",
+      "rating": 5,
+      "message": "sadx",
+      "status": "Published",
+      "createdAt": "2026-07-23T04:36:06.834Z"
+    },
+    {
+      "id": "1784781984050",
+      "userId": "3",
+      "userName": "John Doe",
+      "hospitalId": "1784777379720",
+      "rating": 5,
+      "message": "fcs",
+      "status": "Published",
+      "createdAt": "2026-07-23T04:46:24.050Z"
+    },
+    {
+      "id": "1784794717171",
+      "userId": "3",
+      "userName": "John Doe",
+      "hospitalId": "h2",
+      "rating": 5,
+      "message": "sd",
+      "status": "Published",
+      "createdAt": "2026-07-23T08:18:37.171Z"
+    },
+    {
+      "id": "1784794723633",
+      "userId": "3",
+      "userName": "John Doe",
+      "hospitalId": "h3",
+      "rating": 5,
+      "message": "s",
+      "status": "Published",
+      "createdAt": "2026-07-23T08:18:43.633Z"
+    },
+    {
+      "id": "1784794731402",
+      "userId": "3",
+      "userName": "John Doe",
+      "hospitalId": "1784772495066",
+      "rating": 5,
+      "message": "sd",
+      "status": "Published",
+      "createdAt": "2026-07-23T08:18:51.402Z"
+    }
+  ],
+  "calls": [
+    {
+      "id": "1784781354977",
+      "userId": "3",
+      "hospitalId": "1784772495066",
+      "patientName": "kANIKA",
+      "patientPhone": "9814538354",
+      "notes": "TEST",
+      "status": "Completed",
+      "createdAt": "2026-07-23T04:35:54.977Z"
+    },
+    {
+      "id": "1784781356287",
+      "userId": "3",
+      "hospitalId": "1784772495066",
+      "patientName": "kANIKA",
+      "patientPhone": "9814538354",
+      "notes": "TEST",
+      "status": "Completed",
+      "createdAt": "2026-07-23T04:35:56.287Z"
+    },
+    {
+      "id": "1784781979394",
+      "userId": "3",
+      "hospitalId": "1784777379720",
+      "patientName": "abhi",
+      "patientPhone": "9814538354",
+      "notes": "FEVER",
+      "status": "Completed",
+      "createdAt": "2026-07-23T04:46:19.394Z"
+    }
+  ],
+  "transcriptions": [
+    {
+      "id": "1784781354978",
+      "callId": "1784781354977",
+      "hospitalId": "1784772495066",
+      "userId": "3",
+      "transcript": "TEST",
+      "createdAt": "2026-07-23T04:35:54.977Z"
+    },
+    {
+      "id": "1784781356288",
+      "callId": "1784781356287",
+      "hospitalId": "1784772495066",
+      "userId": "3",
+      "transcript": "TEST",
+      "createdAt": "2026-07-23T04:35:56.287Z"
+    },
+    {
+      "id": "1784781979395",
+      "callId": "1784781979394",
+      "hospitalId": "1784777379720",
+      "userId": "3",
+      "transcript": "FEVER",
+      "createdAt": "2026-07-23T04:46:19.394Z"
+    }
+  ]
+}
