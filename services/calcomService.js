@@ -1,14 +1,8 @@
-// Cal.com v2 integration. Books demo slots through Cal.com so each booking gets a real
-// Google Meet link (the book-demo event's location is Google Meet). Degrades gracefully:
-// if CALCOM_API_KEY / CALCOM_EVENT_TYPE_ID are missing, isConfigured() is false and the
-// scheduler falls back to the local DB slot picker.
-
 const API = 'https://api.cal.com/v2';
 const KEY = process.env.CALCOM_API_KEY;
 const EVENT_TYPE_ID = process.env.CALCOM_EVENT_TYPE_ID;
 const TZ = process.env.CALCOM_TIMEZONE || 'Asia/Calcutta';
 const DAYS_AHEAD = Number(process.env.CALCOM_DAYS_AHEAD || 14);
-// Business-hours template used to render booked (red) vs available (green) slots.
 const START_HOUR = Number(process.env.SLOT_START_HOUR || 9);
 const END_HOUR = Number(process.env.SLOT_END_HOUR || 17);
 const STEP_MIN = Number(process.env.SLOT_STEP_MINUTES || 30);

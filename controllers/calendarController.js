@@ -1,13 +1,5 @@
 const { supabase, isConfigured } = require('../config/supabase');
 
-// Unified calendar feed for the dashboards: patient appointments + demo meetings
-// in one normalised list, scoped to whoever is asking.
-//
-//   superadmin → everything
-//   admin      → appointments for their own hospital only (demos are a sales-side
-//                concern, so they're excluded)
-//   user       → their own appointments
-
 const APPOINTMENT_COLOURS = {
   Pending: 'amber',
   Confirmed: 'blue',

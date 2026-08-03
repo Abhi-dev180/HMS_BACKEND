@@ -8,7 +8,6 @@ const submitPublicFeedback = async (req, res) => {
   }
 
   try {
-    // ✅ Use EXACT column names from your database (lowercase)
     const row = {
       hospitalid: hospitalId,
       patientname: patientName || 'Anonymous',   

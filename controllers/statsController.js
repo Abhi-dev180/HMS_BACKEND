@@ -1,8 +1,5 @@
 const { supabase, isConfigured } = require('../config/supabase');
 
-// Live counters for the superadmin overview. Everything is fetched with
-// `head: true` + `count: 'exact'` so we pay for counts, not rows.
-
 const countRows = async (table, apply) => {
   let q = supabase.from(table).select('*', { count: 'exact', head: true });
   if (apply) q = apply(q);

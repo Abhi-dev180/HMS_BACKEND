@@ -1,6 +1,3 @@
-// Custom in-app scheduler. Generates bookable slots (business hours, weekdays).
-// The DB partial-unique index on demo_bookings (status='scheduled', scheduled_at) is the
-// hard guarantee against double-booking; this layer decides which slots to show and their state.
 
 const START_HOUR = Number(process.env.SLOT_START_HOUR || 9);   // 09:00
 const END_HOUR = Number(process.env.SLOT_END_HOUR || 17);      // last slot before 17:00

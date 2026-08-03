@@ -1,7 +1,5 @@
 const { supabase } = require('../config/supabase');
-
 const TABLE = 'appointment_feedbacks';
-
 // PostgREST reports an un-migrated table as PGRST205. Name the actual problem
 // instead of a generic 500, which sends people hunting for a network fault.
 const isMissingTable = (error) =>
