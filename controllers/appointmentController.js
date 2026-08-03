@@ -28,8 +28,11 @@ const hospitalName = async (hospitalId) => {
 // ─── Helper: create/update/delete Google Calendar events ──────
 const syncGoogleCalendar = async (action, appointment, patch = {}) => {
   try {
-    const startTime = new Date(`${appointment.date}T${appointment.time}:00`).toISOString();
-    const endTime = new Date(new Date(startTime).getTime() + 30 * 60000).toISOString();
+    const pad = (v) => String(v).padStart(2, '0');
+    const formatLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+    const startObj = new Date(`${appointment.date}T${appointment.time}:00`);
+    const startTime = formatLocal(startObj);
+    const endTime = formatLocal(new Date(startObj.getTime() + 30 * 60000));
 
     if (action === 'create') {
       const event = await createCalendarEvent({
@@ -48,8 +51,9 @@ const syncGoogleCalendar = async (action, appointment, patch = {}) => {
     }
 
     if (action === 'update' && appointment.google_event_id) {
-      const newStart = new Date(`${patch.date}T${patch.time}:00`).toISOString();
-      const newEnd = new Date(new Date(newStart).getTime() + 30 * 60000).toISOString();
+      const newStartObj = new Date(`${patch.date}T${patch.time}:00`);
+      const newStart = formatLocal(newStartObj);
+      const newEnd = formatLocal(new Date(newStartObj.getTime() + 30 * 60000));
       await updateCalendarEvent(appointment.google_event_id, {
         summary: `Appointment - ${appointment.patientName}`,
         start: newStart,
@@ -90,8 +94,17 @@ const getBookedSlots = async (req, res) => {
 const bookAppointment = async (req, res) => {
   const { doctorName, date, time, patientName, patientPhone, reason, petName, species, appointmentType } = req.body;
   const hospitalId = req.body.hospitalId || (req.user.role === 'admin' ? req.user.hospitalId : undefined);
-  if (!hospitalId || !patientName || !patientPhone) {
-    return res.status(400).json({ message: 'Hospital, patient name and mobile number are required' });
+  if (!hospitalId || !patientName || !patientPhone || !date || !time) {
+    return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
+  }
+
+  try {
+    const booked = await getBookedSlotsForDate(date, hospitalId);
+    if (Array.isArray(booked) && booked.includes(time)) {
+      return res.status(409).json({ message: 'That slot is already booked. Please choose another time.' });
+    }
+  } catch (err) {
+    console.error('[appointments] slot check failed:', err);
   }
 
   const row = {
@@ -100,8 +113,8 @@ const bookAppointment = async (req, res) => {
     hospitalId,
     hospital: await hospitalName(hospitalId),
     doctorName: doctorName || 'Any Available Doctor',
-    date: date || '',
-    time: time || '',
+    date,
+    time,
     patientName,
     patientPhone,
     reason: reason || '',
@@ -150,8 +163,8 @@ const bookAppointment = async (req, res) => {
 // ─── POST /api/appointments/public (unauthenticated) ──────────
 const bookPublicAppointment = async (req, res) => {
   const { hospitalId, patientName, patientPhone, email, date, time, description, petName, species } = req.body || {};
-  if (!hospitalId || !patientName || !patientPhone) {
-    return res.status(400).json({ message: 'Hospital, patient name and mobile number are required' });
+  if (!hospitalId || !patientName || !patientPhone || !date || !time) {
+    return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
   }
   if (!/^\d{10}$/.test(String(patientPhone).trim())) {
     return res.status(400).json({ message: 'Mobile number must be exactly 10 digits' });
@@ -159,6 +172,15 @@ const bookPublicAppointment = async (req, res) => {
 
   const name = await hospitalName(hospitalId);
   if (!name) return res.status(404).json({ message: 'Selected hospital not found' });
+
+  try {
+    const booked = await getBookedSlotsForDate(date, String(hospitalId));
+    if (Array.isArray(booked) && booked.includes(time)) {
+      return res.status(409).json({ message: 'That slot is already booked. Please choose another time.' });
+    }
+  } catch (err) {
+    console.error('[appointments] public slot check failed:', err);
+  }
 
   const row = {
     id: Date.now().toString(),
@@ -168,8 +190,8 @@ const bookPublicAppointment = async (req, res) => {
     patientName: String(patientName).trim(),
     patientPhone: String(patientPhone).trim(),
     email: email ? String(email).trim() : '',
-    date: date || '',
-    time: time || '',
+    date,
+    time,
     reason: description ? String(description).trim() : '',
     petName: petName || '',
     species: species || '',
@@ -329,6 +351,22 @@ const updateAppointment = async (req, res) => {
       if (f === 'status') statusChanged = true;
     }
   });
+
+  if ((patch.date || patch.time) && appt.hospitalId) {
+    const newDate = patch.date || appt.date;
+    const newTime = patch.time || appt.time;
+    const movingSlot = newDate !== appt.date || newTime !== appt.time;
+    if (movingSlot) {
+      try {
+        const booked = await getBookedSlotsForDate(newDate, appt.hospitalId);
+        if (Array.isArray(booked) && booked.includes(newTime)) {
+          return res.status(409).json({ message: 'That slot is already booked. Please choose another time.' });
+        }
+      } catch (err) {
+        console.error('[appointments] update slot check failed:', err);
+      }
+    }
+  }
 
   const { data, error } = await supabase.from(T).update(patch).eq('id', id).select().single();
   if (error) {
@@ -544,65 +582,7 @@ const reschedulePublicAppointment = async (req, res) => {
   });
 };
 
-const cancelPublicAppointment = async (req, res) => {
-  const patientPhone = req.body?.patientPhone ?? req.query.patientPhone;
-  const email = req.body?.email ?? req.query.email;
-  const reason = req.body?.reason ?? req.query.reason;
-
-  const { appointment, error: guard } = await loadOwnedAppointment(req.params.id, { patientPhone, email });
-  if (guard) return res.status(guard.status).json({ message: guard.message });
-
-  if (appointment.status === 'Cancelled') {
-    return res.status(409).json({ message: 'This appointment is already cancelled.' });
-  }
-  if (appointment.status === 'Completed') {
-    return res.status(409).json({ message: 'A completed appointment can no longer be cancelled.' });
-  }
-
-  if (appointment.google_event_id) {
-    await syncGoogleCalendar('delete', appointment);
-  }
-
-  const patch = {
-    status: 'Cancelled',
-    updatedAt: new Date().toISOString()
-  };
-  if (reason && String(reason).trim()) {
-    patch.reason = `${appointment.reason ? `${appointment.reason} — ` : ''}Cancelled by patient: ${String(reason).trim()}`;
-  }
-
-  const { data, error } = await supabase.from(T).update(patch).eq('id', appointment.id).select().single();
-  if (error) {
-    console.error('[appointments] cancel error:', error);
-    return res.status(500).json({ message: 'Could not cancel the appointment' });
-  }
-
-  sendAppointmentCancelled({
-    to: data.email,
-    patientName: data.patientName,
-    hospitalName: data.hospital,
-    date: data.date,
-    time: data.time,
-    reason: reason ? String(reason).trim() : ''
-  }).catch((e) => console.error('[appointments] cancellation email failed:', e));
-
-  sendAppointmentNewToSuperAdmin({
-    patientName: data.patientName,
-    patientPhone: data.patientPhone,
-    email: data.email,
-    hospitalName: data.hospital,
-    date: data.date,
-    time: data.time,
-    petName: data.petName,
-    description: `CANCELLED by the patient. ${reason ? `Reason: ${String(reason).trim()}` : ''}`.trim(),
-    source: 'public'
-  }).catch((e) => console.error('[appointments] superadmin cancellation email failed:', e));
-
-  return res.json({
-    message: 'Appointment cancelled. A confirmation has been emailed to you.',
-    appointment: publicAppointmentView(data)
-  });
-};
+// Cancel public appointment moved to cancelAppointmentController.js
 
 module.exports = {
   bookAppointment,
@@ -614,5 +594,4 @@ module.exports = {
   getBookedSlots,
   lookupAppointments,
   reschedulePublicAppointment,
-  cancelPublicAppointment
 };

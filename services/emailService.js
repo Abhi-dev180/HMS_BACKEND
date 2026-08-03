@@ -68,13 +68,17 @@ if (GOOGLE_USER && GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REFRESH_TO
 
 // ─── Verify transporter ──────────────────────────────────────
 if (transporter) {
-  transporter.verify((error) => {
-    if (error) {
-      console.error('❌ Email transporter verification failed:', error.message);
-    } else {
-      console.log(`✅ Email transporter ready (${authMethod})`);
-    }
-  });
+  if (authMethod === 'App Password') {
+    transporter.verify((error) => {
+      if (error) {
+        console.error('❌ Email transporter verification failed:', error.message);
+      } else {
+        console.log(`✅ Email transporter ready (${authMethod})`);
+      }
+    });
+  } else {
+    console.log('ℹ️ OAuth2 email transporter created; SMTP verification skipped. Gmail API is used by default for OAuth2 email sending.');
+  }
 }
 
 // ─── HTML → plain text ────────────────────────────────────────

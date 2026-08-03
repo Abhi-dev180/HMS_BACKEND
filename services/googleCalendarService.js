@@ -3,6 +3,7 @@ const { supabase } = require('../config/supabase');
 
 const GOOGLE_CALENDAR_API_KEY = process.env.GOOGLE_CALENDAR_API_KEY;
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || process.env.GOOGLE_USER || 'primary';
+const TIMEZONE = process.env.GOOGLE_CALENDAR_TIMEZONE || 'Asia/Calcutta';
 
 /* *Fetch access token via Google OAuth2 Refresh Token */
 const getGoogleAccessToken = async () => {
@@ -81,10 +82,18 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
         if (calData.items && Array.isArray(calData.items)) {
           calData.items.forEach((event) => {
             if (event.start && event.start.dateTime) {
-              const eventDate = new Date(event.start.dateTime);
-              const hh = String(eventDate.getUTCHours()).padStart(2, '0');
-              const mm = String(eventDate.getUTCMinutes()).padStart(2, '0');
-              bookedSlots.add(`${hh}:${mm}`);
+              try {
+                const eventDate = new Date(event.start.dateTime);
+                // Convert event time to configured timezone and format HH:mm
+                const hhmm = eventDate.toLocaleTimeString('en-GB', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  timeZone: TIMEZONE
+                });
+                bookedSlots.add(hhmm);
+              } catch (e) {
+                console.error('[googleCalendarService] parsing event time failed:', e);
+              }
             }
           });
         }

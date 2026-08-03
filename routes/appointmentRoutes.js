@@ -9,9 +9,10 @@ const {
   deleteAppointment,
   getBookedSlots,
   lookupAppointments,
-  reschedulePublicAppointment,
-  cancelPublicAppointment
+  reschedulePublicAppointment
 } = require('../controllers/appointmentController');
+
+const { cancelPublicAppointment } = require('../controllers/cancelAppointmentController');
 
 const router = express.Router();
 

@@ -1,5 +1,3 @@
-// Single source of truth for subscription plans.
-// `amount` / `interval` / `interval_count` drive Stripe; the display fields drive the
 // public pricing page (GET /api/payments/plans) so the frontend keeps no plan array.
 
 const PLANS = {
@@ -31,7 +29,6 @@ const PLANS = {
     currency: 'usd',
     interval: 'month',
     interval_count: 3,
-
     order: 2,
     intervalLabel: 'quarterly',
     subtitle: 'Ideal for growing veterinary hospitals',
@@ -53,7 +50,6 @@ const PLANS = {
     currency: 'usd',
     interval: 'year',
     interval_count: 1,
-
     order: 3,
     intervalLabel: 'yearly',
     subtitle: 'For enterprise multi-branch hospitals',
