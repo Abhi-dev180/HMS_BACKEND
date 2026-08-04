@@ -106,13 +106,15 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
   return Array.from(bookedSlots);
 };
 
-// ─── Format time string to HH:mm ──────────────────────────────
+// ─── Format time string to HH:mm (normalize HH:MM:SS -> HH:MM) ───
 const formatTimeString = (t) => {
   if (!t) return '';
   const clean = String(t).trim();
-  if (/^\d{1,2}:\d{2}$/.test(clean)) {
-    const [h, m] = clean.split(':');
-    return `${String(h).padStart(2, '0')}:${m}`;
+  // Match HH:MM or HH:MM:SS (optionally more precision) and normalize to HH:MM
+  const m = clean.match(/^(\d{1,2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+  if (m) {
+    const [h, mm] = m[1].split(':');
+    return `${String(h).padStart(2, '0')}:${mm}`;
   }
   return clean;
 };

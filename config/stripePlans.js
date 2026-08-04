@@ -28,7 +28,7 @@ const PLANS = {
     amount: 20000, // $200.00
     currency: 'usd',
     interval: 'month',
-    interval_count: 3,
+    interval_count: 6,
     order: 2,
     intervalLabel: 'quarterly',
     subtitle: 'Ideal for growing veterinary hospitals',

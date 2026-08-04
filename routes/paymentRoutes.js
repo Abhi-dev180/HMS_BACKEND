@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const { verifySession, webhook } = require('../controllers/paymentController');
+const { authMiddleware } = require('../middleware/authMiddleware');
 const stripeSvc = require('../services/stripeService');
 const { supabase } = require('../config/supabase');
 const { PLANS, getPublicPlans } = require('../config/stripePlans');
@@ -19,6 +20,19 @@ router.get('/verify', verifySession);
 
 // Stripe webhook – must be mounted with express.raw in app.js on this exact path
 router.post('/webhook', express.raw({ type: 'application/json' }), webhook);
+
+// Admin-only: re-sync a Stripe session into payments/subscriptions (helpful for backfill)
+router.post('/sync-session', authMiddleware, async (req, res) => {
+  try {
+    const { session_id } = req.body || {};
+    if (!session_id) return res.status(400).json({ message: 'session_id is required' });
+    const result = await require('../controllers/paymentController').syncSession(session_id);
+    return res.json(result);
+  } catch (e) {
+    console.error('[payments] sync-session error:', e);
+    return res.status(500).json({ message: 'sync failed' });
+  }
+});
 
 // ─── Create one‑time checkout session ────────────────────────
 router.post('/create-checkout-session', async (req, res) => {
@@ -78,6 +92,7 @@ router.post('/create-checkout-session', async (req, res) => {
       booking_id: bookingId,      // now uses the real booking ID (or null if not found)
       email: booking.email,
       stripe_session_id: session.id,
+      plan_key: planKey || 'basic',
       amount: plan.amount,
       currency: 'usd',
       status: 'pending'
