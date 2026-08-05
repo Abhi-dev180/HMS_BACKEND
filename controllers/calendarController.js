@@ -17,8 +17,6 @@ const DEMO_COLOURS = {
   cancelled: 'red'
 };
 
-// `date` + `time` are stored as separate text columns; combine them into the
-// local ISO-ish string the frontend groups by. Returns null when unschedulable.
 const toStartISO = (date, time) => {
   if (!date) return null;
   const t = /^\d{2}:\d{2}/.test(time || '') ? time.slice(0, 5) : '00:00';

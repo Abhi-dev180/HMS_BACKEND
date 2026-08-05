@@ -442,7 +442,7 @@ const updateAppointment = async (req, res) => {
         time: appt.time,
         status: patch.status,
         message: req.body.message || undefined,
-        appointmentNumber: appt.appointment_number   // ✅ fixed
+        appointmentNumber: appt.appointment_number   
       }).catch((e) => console.error('[appointments] status update email failed:', e));
     }
 
