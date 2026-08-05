@@ -1863,7 +1863,28 @@ const fmtWhen = (d) => d ? new Date(d).toLocaleString('en-US', { dateStyle: 'med
 
 // ─── All template functions ──────────────────────────────────
 
-const demoReceived = ({ contactName, hospitalName }) => ({
+// const demoReceived = ({ contactName, hospitalName }) => ({
+//   subject: 'Demo request received',
+//   html: shell({
+//     heading: 'We received your demo request',
+//     intro: `Hi ${contactName || 'there'}, thanks for reaching out to us.`,
+//     bodyHtml: `
+//       <p style="margin: 0 0 14px 0;">Your request for <strong>${escapeHtml(hospitalName || 'your hospital')}</strong> has been received and is now in our queue.</p>
+//       ${detailRows([
+//         ['Hospital', hospitalName],
+//         ['Contact', contactName],
+//         ['Status', 'Awaiting scheduling']
+//       ])}
+//     `,
+//     footNote: 'Demo request from Pet Hospital Portal'
+//   })
+// });
+
+// email_template/index.js
+
+// email_template/index.js
+
+const demoReceived = ({ contactName, hospitalName, token, bookingId }) => ({
   subject: 'Demo request received',
   html: shell({
     heading: 'We received your demo request',
@@ -1871,10 +1892,13 @@ const demoReceived = ({ contactName, hospitalName }) => ({
     bodyHtml: `
       <p style="margin: 0 0 14px 0;">Your request for <strong>${escapeHtml(hospitalName || 'your hospital')}</strong> has been received and is now in our queue.</p>
       ${detailRows([
+        ['Booking ID', bookingId],
         ['Hospital', hospitalName],
         ['Contact', contactName],
         ['Status', 'Awaiting scheduling']
       ])}
+      ${token ? button(`${FRONTEND_REDIRECT_URL}/schedule/${token}`, 'Schedule your demo now') : ''}
+      ${token ? `<p style="margin:16px 0 0;font-size:13px;color:#64748b;">Or use this link: <a href="${FRONTEND_REDIRECT_URL}/schedule/${token}">${FRONTEND_REDIRECT_URL}/schedule/${token}</a></p>` : ''}
     `,
     footNote: 'Demo request from Pet Hospital Portal'
   })
