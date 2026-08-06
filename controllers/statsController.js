@@ -285,5 +285,4 @@ const getOverviewStats = async (req, res) => {
   }
 };
 
-module.exports = { getOverviewStats }; 
- 
+module.exports = { getOverviewStats };
