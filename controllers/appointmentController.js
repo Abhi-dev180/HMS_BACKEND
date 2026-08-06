@@ -75,6 +75,79 @@ const getUserEmail = async (appointment) => {
 };
 
 // ─── Helper: Google Calendar sync ─────────────────────────────
+// const syncGoogleCalendar = async (action, appointment, patch = {}) => {
+//   try {
+//     const pad = (v) => String(v).padStart(2, '0');
+//     const formatLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+//     const startObj = new Date(`${appointment.date}T${appointment.time}:00`);
+//     const startTime = formatLocal(startObj);
+//     const endTime = formatLocal(new Date(startObj.getTime() + 30 * 60000));
+
+
+//         // Build a rich description
+//     const description = `
+// Appointment Details:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 🏥 Hospital: ${appointment.hospital || 'N/A'}
+// 👤 Patient: ${appointment.patientName || 'N/A'}
+// 📱 Phone: ${appointment.patientPhone || 'N/A'}
+// 📧 Email: ${appointment.email || 'N/A'}
+// 🐾 Pet Name: ${appointment.petName || 'N/A'}
+// 🐶 Species: ${appointment.species || 'N/A'}
+// ⚥ Sex: ${appointment.sex || 'N/A'}
+// 📝 Breed: ${appointment.breed || 'N/A'}
+// 📅 Date: ${appointment.date || 'N/A'}
+// ⏰ Time: ${appointment.time || 'N/A'}
+// 📋 Reason: ${appointment.reason || 'No additional details'}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Appointment #${appointment.appointment_number}
+// Scheduled via Pet Hospital Portal
+// `.trim();
+
+
+
+//     if (action === 'create') {
+//       const event = await createCalendarEvent({
+//         summary: `Appointment - ${appointment.patientName}`,
+//         description: appointment.reason || 'No additional details',
+//         start: startTime,
+//         end: endTime,
+//         attendees: appointment.email ? [appointment.email] : []
+//       });
+//       await supabase
+//         .from(T)
+//         .update({ google_event_id: event.id })
+//         .eq('id', appointment.id);
+//       console.log('[googleCalendar] Event created:', event.id);
+//       return event;
+//     }
+
+//     if (action === 'update' && appointment.google_event_id) {
+//       const newStartObj = new Date(`${patch.date}T${patch.time}:00`);
+//       const newStart = formatLocal(newStartObj);
+//       const newEnd = formatLocal(new Date(newStartObj.getTime() + 30 * 60000));
+//       await updateCalendarEvent(appointment.google_event_id, {
+//         summary: `Appointment - ${appointment.patientName}`,
+//         start: newStart,
+//         end: newEnd
+//       });
+//       console.log('[googleCalendar] Event updated:', appointment.google_event_id);
+//     }
+
+//     if (action === 'delete' && appointment.google_event_id) {
+//       await deleteCalendarEvent(appointment.google_event_id);
+//       await supabase
+//         .from(T)
+//         .update({ google_event_id: null })
+//         .eq('id', appointment.id);
+//       console.log('[googleCalendar] Event deleted:', appointment.google_event_id);
+//     }
+//   } catch (err) {
+//     console.error('[googleCalendar] sync error:', err);
+//   }
+// };
+
+
 const syncGoogleCalendar = async (action, appointment, patch = {}) => {
   try {
     const pad = (v) => String(v).padStart(2, '0');
@@ -83,10 +156,30 @@ const syncGoogleCalendar = async (action, appointment, patch = {}) => {
     const startTime = formatLocal(startObj);
     const endTime = formatLocal(new Date(startObj.getTime() + 30 * 60000));
 
+    // ─── Rich description with all fields ──────────────────────
+    const description = `
+Appointment Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏥 Hospital: ${appointment.hospital || 'N/A'}
+👤 Patient: ${appointment.patientName || 'N/A'}
+📱 Phone: ${appointment.patientPhone || 'N/A'}
+📧 Email: ${appointment.email || 'N/A'}
+🐾 Pet Name: ${appointment.petName || 'N/A'}
+🐶 Species: ${appointment.species || 'N/A'}
+⚥ Sex: ${appointment.sex || 'N/A'}
+📝 Breed: ${appointment.breed || 'N/A'}
+📅 Date: ${appointment.date || 'N/A'}
+⏰ Time: ${appointment.time || 'N/A'}
+📋 Reason: ${appointment.reason || 'No additional details'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Appointment #${appointment.appointment_number}
+Scheduled via Pet Hospital Portal
+`.trim();
+
     if (action === 'create') {
       const event = await createCalendarEvent({
         summary: `Appointment - ${appointment.patientName}`,
-        description: appointment.reason || 'No additional details',
+        description: description,   // ✅ USE the rich description
         start: startTime,
         end: endTime,
         attendees: appointment.email ? [appointment.email] : []
@@ -105,6 +198,7 @@ const syncGoogleCalendar = async (action, appointment, patch = {}) => {
       const newEnd = formatLocal(new Date(newStartObj.getTime() + 30 * 60000));
       await updateCalendarEvent(appointment.google_event_id, {
         summary: `Appointment - ${appointment.patientName}`,
+        description: description,   // ✅ Also update description if you like
         start: newStart,
         end: newEnd
       });
@@ -140,7 +234,7 @@ const getBookedSlots = async (req, res) => {
 
 // ─── POST /api/appointments (authenticated) ──────────────────
 const bookAppointment = async (req, res) => {
-  const { doctorName, date, time, patientName, patientPhone, reason, petName, species, appointmentType } = req.body;
+  const { doctorName, date, time, patientName, patientPhone, reason, petName, species,sex, breed, appointmentType } = req.body;
   const hospitalId = req.body.hospitalId || (req.user.role === 'admin' ? req.user.hospitalId : undefined);
   if (!hospitalId || !patientName || !patientPhone || !date || !time) {
     return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
@@ -171,6 +265,8 @@ const bookAppointment = async (req, res) => {
     reason: reason || '',
     petName: petName || '',
     species: species || '',
+    sex: sex || '',
+    breed: breed || '',
     appointmentType: appointmentType || 'Consult',
     status: 'Pending',
     appointment_number: appointmentNumber
@@ -218,7 +314,7 @@ const bookAppointment = async (req, res) => {
 
 // ─── POST /api/appointments/public (unauthenticated) ─────────
 const bookPublicAppointment = async (req, res) => {
-  const { hospitalId, patientName, patientPhone, email, date, time, description, petName, species } = req.body || {};
+  const { hospitalId, patientName, patientPhone, email, date, time, description, petName, species, sex, breed } = req.body || {};
   if (!hospitalId || !patientName || !patientPhone || !date || !time) {
     return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
   }
@@ -254,6 +350,8 @@ const bookPublicAppointment = async (req, res) => {
     reason: description ? String(description).trim() : '',
     petName: petName || '',
     species: species || '',
+     sex: sex || '',          
+    breed: breed || '',      
     appointmentType: 'Consult',
     status: 'Pending',
     source: 'public',
@@ -278,7 +376,10 @@ const bookPublicAppointment = async (req, res) => {
       petName: data.petName,
       description: data.reason,
       email: data.email,
-      appointmentNumber: data.appointment_number
+      appointmentNumber: data.appointment_number,
+      species: data.species,   
+      sex: data.sex,           
+      breed: data.breed        
     }).catch((e) => console.error('[appointments] confirmation email failed:', e));
   }
 
@@ -393,7 +494,7 @@ const updateAppointment = async (req, res) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  const fields = ['date', 'time', 'patientName', 'patientPhone', 'reason', 'petName', 'species', 'appointmentType', 'status', 'doctorName'];
+  const fields = ['date', 'time', 'patientName', 'patientPhone', 'reason', 'petName', 'species','sex', 'breed', 'appointmentType', 'status', 'doctorName'];
   const patch = { updatedAt: new Date().toISOString() };
   let statusChanged = false;
   fields.forEach((f) => {
@@ -528,6 +629,7 @@ const normalizePhone = (v) => String(v || '').replace(/\D/g, '');
 const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
 
 const publicAppointmentView = (a) => ({
+  appointmentNumber: a.appointment_number,
   id: a.id,
   hospital: a.hospital,
   hospitalId: a.hospitalId,
@@ -536,6 +638,8 @@ const publicAppointmentView = (a) => ({
   email: a.email || '',
   petName: a.petName || '',
   species: a.species || '',
+  sex: a.sex || '',
+  breed: a.breed || '',
   doctorName: a.doctorName || '',
   date: a.date || '',
   time: a.time || '',

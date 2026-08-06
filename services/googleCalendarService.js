@@ -6,31 +6,65 @@ const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || process.env.GOOGLE_
 const TIMEZONE = process.env.GOOGLE_CALENDAR_TIMEZONE || 'Asia/Calcutta';
 
 /* *Fetch access token via Google OAuth2 Refresh Token */
+// const getGoogleAccessToken = async () => {
+//   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = process.env;
+//   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) return null;
+
+//   try {
+//     const res = await fetch('https://oauth2.googleapis.com/token', {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+//       body: new URLSearchParams({
+//         client_id: GOOGLE_CLIENT_ID,
+//         client_secret: GOOGLE_CLIENT_SECRET,
+//         refresh_token: GOOGLE_REFRESH_TOKEN,
+//         grant_type: 'refresh_token'
+//       })
+//     });
+//     if (res.ok) {
+//       const data = await res.json();
+//       return data.access_token;
+//     }
+//   } catch (err) {
+//     console.error('[googleCalendarService] OAuth token fetch error:', err);
+//   }
+//   return null;
+// };
+
+
+
 const getGoogleAccessToken = async () => {
-  const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = process.env;
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) return null;
+  const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN;
+  const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    console.warn('[googleCalendar] Missing Calendar credentials.');
+    return null;
+  }
 
   try {
     const res = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
-        refresh_token: GOOGLE_REFRESH_TOKEN,
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
         grant_type: 'refresh_token'
       })
     });
     if (res.ok) {
       const data = await res.json();
       return data.access_token;
+    } else {
+      console.error('[googleCalendar] Token fetch failed:', await res.text());
     }
   } catch (err) {
-    console.error('[googleCalendarService] OAuth token fetch error:', err);
+    console.error('[googleCalendar] OAuth error:', err);
   }
   return null;
 };
-
 /**
  * Fetch booked time slots for a specific date and hospital.
  * Queries Google Calendar API (via OAuth2 or API Key) and merges with Supabase appointments.
@@ -158,7 +192,8 @@ const createCalendarEvent = async ({
   }
 
   const data = await res.json();
-  return data; // contains id, htmlLink, etc.
+  return data;
+  hangoutLink: data.hangoutLink  // contains id, htmlLink, etc.
 };
 
 // ─── Update a Google Calendar event ────────────────────────────
