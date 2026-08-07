@@ -194,6 +194,8 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const statsRoutes = require('./routes/statsRoutes');
 const calendarRoutes = require('./routes/calendarRoutes');
+const userRoutes = require('./routes/userRoutes');
+
 
 const app = express();
 
@@ -272,6 +274,11 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/calendar', calendarRoutes);
+app.use('/api/users', userRoutes);
+
+const { submitPublicFeedback } = require('./controllers/publicFeedbackController');
+app.post('/api/public-feedback', submitPublicFeedback);
+
 
 // ─── Appointment feedback routes ─────────────────────────────
 const { authMiddleware, roleMiddleware } = require('./middleware/authMiddleware');

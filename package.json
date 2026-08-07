@@ -7,6 +7,7 @@
     "dev": "nodemon server.js",
     "start": "node server.js",
     "check": "node scripts/check-config.js",
+    "add-superadmin": "node scripts/addSuperAdmin.js",
     "cron:subscriptions": "node scripts/check-subscriptions.js"
   },
   "engines": {

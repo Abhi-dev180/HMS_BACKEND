@@ -104,3 +104,18 @@ create table if not exists public.transcriptions (
 create index if not exists transcriptions_hospital_idx on public.transcriptions ("hospitalId");
 
 -- All access is server-side via the service-role key, which bypasses RLS.
+
+-- Add updated_at column
+ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+-- Ensure mobile column exists (already there, but just in case)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile TEXT;
+
+-- Add otp and otp_expires columns for email verification
+ALTER TABLE users ADD COLUMN IF NOT EXISTS otp TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires TIMESTAMP WITH TIME ZONE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT; -- optional, but we use mobile
+
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
