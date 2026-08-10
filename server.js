@@ -376,7 +376,7 @@ app.use((err, req, res, next) => {
 
 // ─── Start server ────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`✅ /api/appointment-feedbacks ready`);
   console.log(`✅ /api/subscriptions ready`);
@@ -391,3 +391,7 @@ app.listen(PORT, () => {
 
   console.log('⏰ Daily cron job scheduled for 00:00');
 });
+
+// Initialize WebSockets
+const { initWebSocket } = require('./services/websocketService');
+initWebSocket(server);

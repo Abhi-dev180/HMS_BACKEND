@@ -9,6 +9,7 @@ const {
 } = require('../services/emailService');
 const { annotateUserWithSubscription } = require('./paymentController');
 const { PLANS } = require('../config/stripePlans');
+const { broadcast } = require('../services/websocketService');
 
 const TABLE = 'registrations';
 const VALID_STATUS = ['pending', 'approved', 'denied', 'active', 'inactive'];
@@ -139,10 +140,13 @@ const createRegistration = async (req, res) => {
     }
 
     const enhanced = { ...publicView(data), payment: payment || null, subscription: subscription || null };
+    broadcast('registration_created', enhanced);
     return res.status(201).json({ message: 'Registration submitted', registration: enhanced });
   } catch (e) {
     console.error('[registrations] enhance data failed:', e);
-    return res.status(201).json({ message: 'Registration submitted', registration: publicView(data) });
+    const fallback = publicView(data);
+    broadcast('registration_created', fallback);
+    return res.status(201).json({ message: 'Registration submitted', registration: fallback });
   }
 };
 
@@ -402,6 +406,7 @@ const updateRegistrationStatus = async (req, res) => {
     console.error('[registrations] status error:', error);
     return res.status(500).json({ message: 'Could not update registration' });
   }
+  broadcast('registration_updated', publicView(data));
   return res.json({ message: `Registration ${update.status}`, registration: publicView(data) });
 };
 
@@ -427,6 +432,7 @@ const assignHospital = async (req, res) => {
     console.error('[registrations] assign error:', error);
     return res.status(500).json({ message: 'Could not assign hospital' });
   }
+  broadcast('registration_updated', publicView(data));
   return res.json({ message: 'Hospital assigned', registration: publicView(data) });
 };
 
@@ -439,6 +445,7 @@ const deleteRegistration = async (req, res) => {
     console.error('[registrations] delete error:', error);
     return res.status(500).json({ message: 'Could not delete registration' });
   }
+  broadcast('registration_deleted', { id });
   return res.json({ message: 'Registration deleted' });
 };
 

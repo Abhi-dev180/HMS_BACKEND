@@ -4,6 +4,7 @@ const {
   sendContactStatusUpdate,
   sendContactNewToSuperAdmin
 } = require('../services/emailService');
+const { broadcast } = require('../services/websocketService');
 
 const T = 'contacts';
 const STATUSES = ['new', 'in_progress', 'resolved', 'closed'];
@@ -100,6 +101,7 @@ const submitContact = async (req, res) => {
     submittedAt: data.created_at
   }).catch((e) => console.error('[contacts] superadmin alert email failed:', e));
 
+  broadcast('contact_created', publicView(data));
   return res.status(201).json({
     message: 'Thanks! Your message has been sent — check your inbox for a confirmation.',
     contact: publicView(data)
@@ -186,6 +188,7 @@ const updateContact = async (req, res) => {
     }).catch((e) => console.error('[contacts] status update email failed:', e));
   }
 
+  broadcast('contact_updated', publicView(data));
   return res.json({
     message: emailed ? 'Contact updated — the sender has been emailed.' : 'Contact updated.',
     emailed,
@@ -206,6 +209,7 @@ const deleteContact = async (req, res) => {
     console.error('[contacts] delete error:', error);
     return res.status(500).json({ message: 'Could not delete the contact message' });
   }
+  broadcast('contact_deleted', { id });
   return res.json({ message: 'Contact message deleted' });
 };
 
