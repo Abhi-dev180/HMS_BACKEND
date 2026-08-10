@@ -240,42 +240,31 @@ const shell = ({ heading, intro, bodyHtml, footNote }) => {
     }
 
     .header {
-      background: linear-gradient(135deg, #0f4c81 0%, #1e88a8 100%);
-      padding: 34px 32px 28px;
+      background: #ffffff;
+      padding: 30px 32px 25px;
       text-align: center;
+      border-bottom: 2px solid #0f4c81;
     }
 
-    .logo-badge {
-      display: inline-block;
-      width: 64px;
-      height: 64px;
-      line-height: 64px;
-      border-radius: 18px;
-      background: rgba(255, 255, 255, 0.15);
-      color: #ffffff;
-      font-size: 32px;
-      text-align: center;
-    }
-
-    .brand-title {
-      color: #ffffff;
-      font-size: 22px;
-      font-weight: 800;
-      letter-spacing: 0.3px;
-      margin-top: 14px;
-      line-height: 1.3;
+    .logo-image {
+      max-height: 55px;
+      height: auto;
+      width: auto;
+      display: block;
+      margin: 0 auto;
     }
 
     .brand-subtitle {
-      color: #d7ecfb;
+      color: #64748b;
       font-size: 13px;
-      margin-top: 6px;
+      margin-top: 10px;
       line-height: 1.6;
+      font-weight: 500;
     }
 
     .top-bar {
       height: 4px;
-      background: linear-gradient(90deg, #38bdf8, #0f4c81, #38bdf8);
+      background: linear-gradient(90deg, #1e88a8, #0f4c81, #1e88a8);
     }
 
     .content {
@@ -311,16 +300,17 @@ const shell = ({ heading, intro, bodyHtml, footNote }) => {
 
     .footer-inner {
       border-top: 1px solid #eef2f7;
-      padding-top: 18px;
-      color: #94a3b8;
+      padding-top: 22px;
+      color: #64748b;
       font-size: 12px;
-      line-height: 1.7;
+      line-height: 1.6;
       text-align: center;
     }
 
-    .footer-icons {
+    .footer-address {
       margin-top: 10px;
-      font-size: 16px;
+      font-size: 12px;
+      color: #94a3b8;
     }
 
     .footer-copy {
@@ -363,11 +353,8 @@ const shell = ({ heading, intro, bodyHtml, footNote }) => {
         font-size: 14px !important;
       }
 
-      .logo-badge {
-        width: 56px !important;
-        height: 56px !important;
-        line-height: 56px !important;
-        font-size: 28px !important;
+      .logo-image {
+        max-height: 45px !important;
       }
 
       .detail-label,
@@ -405,9 +392,8 @@ const shell = ({ heading, intro, bodyHtml, footNote }) => {
           <tr>
             <td class="card">
               <div class="header">
-                <div class="logo-badge">🐾</div>
-                <div class="brand-title">Pet Hospital Portal</div>
-                <div class="brand-subtitle">Modern care management for veterinary teams</div>
+                <img src="https://thumbs.dreamstime.com/b/dreamstime-template-198954292.jpg" alt="MEDPARK Logo" class="logo-image" />
+                <div class="brand-subtitle">Delivering the global standard for precision healthcare.</div>
               </div>
 
               <div class="top-bar"></div>
@@ -422,9 +408,9 @@ const shell = ({ heading, intro, bodyHtml, footNote }) => {
 
               <div class="footer">
                 <div class="footer-inner">
-                  ${escapeHtml(footNote || 'You are receiving this because you engaged with the Pet Hospital Portal.')}
-                  <div class="footer-icons">🐶 🐱 🐾</div>
-                  <div class="footer-copy">© ${year} Pet Hospital Portal · All rights reserved.</div>
+                  <div style="margin-bottom:12px;">${escapeHtml(footNote || 'You are receiving this transactional message because of your recent activity with MEDPARK.')}</div>
+                  <div class="footer-address">123 Health Avenue, Medical District, Mohali, PB 160055</div>
+                  <div class="footer-copy">© ${year} MEDPARK Hospital · All rights reserved.</div>
                 </div>
               </div>
             </td>

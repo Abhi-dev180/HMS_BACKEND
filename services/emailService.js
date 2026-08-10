@@ -19,8 +19,8 @@
 // const MAIL_FROM =
 //   process.env.MAIL_FROM ||
 //   (GOOGLE_USER || GMAIL_USER
-//     ? `Pet Hospital Portal <${GOOGLE_USER || GMAIL_USER}>`
-//     : 'Pet Hospital Portal <no-reply@example.com>');
+//     ? `MEDPARK Hospital <${GOOGLE_USER || GMAIL_USER}>`
+//     : 'MEDPARK Hospital <no-reply@example.com>');
 
 // // ─── Transporter creation ──────────────────────────────────────
 // let transporter = null;
@@ -177,7 +177,7 @@
 //     // multipart/alternative: text first, then HTML (clients pick the last part
 //     // they can render). Sending HTML alone scores badly with spam filters.
 //     const boundary = `mixed_${Buffer.from(`${to}${subject}`).toString('hex').slice(0, 24)}`;
-//     const fromName = process.env.MAIL_BRAND_NAME || 'Pet Hospital Portal';
+//     const fromName = process.env.MAIL_BRAND_NAME || 'MEDPARK Hospital';
 //     const replyTo = process.env.MAIL_REPLY_TO || process.env.MAIL_SUPPORT_EMAIL || GOOGLE_USER;
 
 //     const messageParts = [
@@ -408,8 +408,8 @@
 // const MAIL_FROM =
 //   process.env.MAIL_FROM ||
 //   (GOOGLE_USER || GMAIL_USER
-//     ? `Pet Hospital Portal <${GOOGLE_USER || GMAIL_USER}>`
-//     : 'Pet Hospital Portal <no-reply@example.com>');
+//     ? `MEDPARK Hospital <${GOOGLE_USER || GMAIL_USER}>`
+//     : 'MEDPARK Hospital <no-reply@example.com>');
 
 // // ─── Transporter creation ──────────────────────────────────────
 // let transporter = null;
@@ -556,7 +556,7 @@
 //     const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
 
 //     const boundary = `mixed_${Buffer.from(`${to}${subject}`).toString('hex').slice(0, 24)}`;
-//     const fromName = process.env.MAIL_BRAND_NAME || 'Pet Hospital Portal';
+//     const fromName = process.env.MAIL_BRAND_NAME || 'MEDPARK Hospital';
 //     const replyTo = process.env.MAIL_REPLY_TO || process.env.MAIL_SUPPORT_EMAIL || GOOGLE_USER;
 
 //     const messageParts = [
@@ -797,8 +797,8 @@
 // const MAIL_FROM =
 //   process.env.MAIL_FROM ||
 //   (GOOGLE_USER || GMAIL_USER
-//     ? `Pet Hospital Portal <${GOOGLE_USER || GMAIL_USER}>`
-//     : 'Pet Hospital Portal <no-reply@example.com>');
+//     ? `MEDPARK Hospital <${GOOGLE_USER || GMAIL_USER}>`
+//     : 'MEDPARK Hospital <no-reply@example.com>');
 
 // // ─── Transporter creation ──────────────────────────────────────
 // let transporter = null;
@@ -945,7 +945,7 @@
 //     const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
 
 //     const boundary = `mixed_${Buffer.from(`${to}${subject}`).toString('hex').slice(0, 24)}`;
-//     const fromName = process.env.MAIL_BRAND_NAME || 'Pet Hospital Portal';
+//     const fromName = process.env.MAIL_BRAND_NAME || 'MEDPARK Hospital';
 //     const replyTo = process.env.MAIL_REPLY_TO || process.env.MAIL_SUPPORT_EMAIL || GOOGLE_USER;
 
 //     const messageParts = [
@@ -1191,8 +1191,8 @@ const GOOGLE_REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN;
 const MAIL_FROM =
   process.env.MAIL_FROM ||
   (GOOGLE_USER || GMAIL_USER
-    ? `Pet Hospital Portal <${GOOGLE_USER || GMAIL_USER}>`
-    : 'Pet Hospital Portal <no-reply@example.com>');
+    ? `MEDPARK Hospital <${GOOGLE_USER || GMAIL_USER}>`
+    : 'MEDPARK Hospital <no-reply@example.com>');
 
 // ─── Transporter creation ──────────────────────────────────────
 let transporter = null;
@@ -1339,7 +1339,7 @@ const sendViaGmailApi = async ({ to, subject, html, text }) => {
     const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
 
     const boundary = `mixed_${Buffer.from(`${to}${subject}`).toString('hex').slice(0, 24)}`;
-    const fromName = process.env.MAIL_BRAND_NAME || 'Pet Hospital Portal';
+    const fromName = process.env.MAIL_BRAND_NAME || 'MEDPARK Hospital';
     const replyTo = process.env.MAIL_REPLY_TO || process.env.MAIL_SUPPORT_EMAIL || GOOGLE_USER;
 
     const messageParts = [
