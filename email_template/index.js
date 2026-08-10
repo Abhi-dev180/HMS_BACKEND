@@ -1774,6 +1774,13 @@ const scheduleInvite = ({ contactName, hospitalName, token }) => ({
 // };
 
 
+const getJoinText = (link) => {
+  if (!link) return '🔗 Join Meeting';
+  if (link.includes('zoom.us')) return '🔗 Join Zoom Meeting';
+  if (link.includes('meet.google.com')) return '🔗 Join Google Meet';
+  return '🔗 Join Meeting';
+};
+
 const demoConfirmation = ({ contactName, hospitalName, scheduledAt, meetingLink }) => {
   const date = scheduledAt ? new Date(scheduledAt) : null;
   const formattedDate = date ? date.toLocaleDateString('en-US', {
@@ -1809,7 +1816,7 @@ const demoConfirmation = ({ contactName, hospitalName, scheduledAt, meetingLink 
               <a href="${meetingLink}" style="color: ${C.blue}; text-decoration: none; font-weight: 600;" target="_blank">${meetingLink}</a>
             </p>
           </div>
-          ${button(meetingLink, '🔗 Join Meeting')}
+          ${button(meetingLink, getJoinText(meetingLink))}
           <p style="margin: 10px 0 0 0; font-size: 13px; color: #64748b;">📌 Please join 5 minutes before the scheduled time.</p>
         ` : ''}
       `,
@@ -1831,7 +1838,7 @@ const meetingLinkReady = ({ contactName, hospitalName, scheduledAt, meetingLink 
         <div style="background: #dbeafe; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid ${C.blue};">
           <a href="${meetingLink}" style="color: ${C.blue}; text-decoration: none; font-weight: 600; word-break: break-all;" target="_blank">${meetingLink}</a>
         </div>
-        ${button(meetingLink, '🔗 Join Meeting')}
+        ${button(meetingLink, getJoinText(meetingLink))}
       ` : ''}
     `,
     footNote: 'This meeting link is unique to this session.',

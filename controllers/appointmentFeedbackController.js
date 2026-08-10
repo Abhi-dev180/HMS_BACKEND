@@ -1,4 +1,5 @@
 const { supabase } = require('../config/supabase');
+const { broadcast } = require('../services/websocketService');
 const TABLE = 'appointment_feedbacks';
 
 const isMissingTable = (error) =>
@@ -124,7 +125,7 @@ const createFeedback = async (req, res) => {
       return res.status(500).json({ message: 'Could not create feedback' });
     }
 
-    return res.status(201).json({
+    const responseData = {
       id: data.id,
       patientName: data.patientname,
       petName: data.petname,
@@ -139,7 +140,10 @@ const createFeedback = async (req, res) => {
       hospitalId: data.hospitalid,
       createdBy: data.createdby,
       created_at: data.created_at
-    });
+    };
+
+    broadcast('feedback_created', responseData);
+    return res.status(201).json(responseData);
   } catch (err) {
     console.error('[appt feedback] create unexpected error:', err);
     return res.status(500).json({ message: 'Server error' });
@@ -194,7 +198,7 @@ const updateFeedback = async (req, res) => {
       return res.status(500).json({ message: 'Update failed' });
     }
 
-    return res.json({
+    const responseData = {
       id: data.id,
       patientName: data.patientname,
       petName: data.petname,
@@ -209,7 +213,10 @@ const updateFeedback = async (req, res) => {
       hospitalId: data.hospitalid,
       createdBy: data.createdby,
       created_at: data.created_at
-    });
+    };
+
+    broadcast('feedback_updated', responseData);
+    return res.json(responseData);
   } catch (err) {
     console.error('[appt feedback] update unexpected error:', err);
     return res.status(500).json({ message: 'Server error' });
@@ -228,6 +235,7 @@ const deleteFeedback = async (req, res) => {
       console.error('[appt feedback] delete error:', error);
       return res.status(500).json({ message: 'Delete failed' });
     }
+    broadcast('feedback_deleted', { id: Number(id) });
     return res.json({ message: 'Feedback deleted' });
   } catch (err) {
     console.error('[appt feedback] delete unexpected error:', err);

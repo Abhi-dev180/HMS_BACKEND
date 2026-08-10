@@ -377,6 +377,24 @@ const updateRegistrationStatus = async (req, res) => {
       console.error('[registrations] Error during subscription/annotation:', e);
     }
 
+    // ─── Delete Demo Booking ──────────────────────────────────
+    try {
+      if (reg.booking_id) {
+        await supabase.from('demo_bookings').delete().eq('id', reg.booking_id);
+        broadcast('demo_deleted', { id: reg.booking_id });
+        console.log(`[registrations] Deleted demo booking ${reg.booking_id} after approval`);
+      } else if (reg.email) {
+        const { data: demosToDelete } = await supabase.from('demo_bookings').select('id').eq('email', reg.email);
+        if (demosToDelete && demosToDelete.length > 0) {
+          await supabase.from('demo_bookings').delete().eq('email', reg.email);
+          demosToDelete.forEach(d => broadcast('demo_deleted', { id: d.id }));
+          console.log(`[registrations] Deleted ${demosToDelete.length} demo booking(s) for email ${reg.email} after approval`);
+        }
+      }
+    } catch (e) {
+      console.error('[registrations] Error deleting demo booking:', e);
+    }
+
     // ─── Send email ──────────────────────────────────────────
     const loginPassword = reg.details?.password || pwd || user.password || '';
     sendRegistrationApproved({
