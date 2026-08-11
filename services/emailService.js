@@ -1298,14 +1298,15 @@ const htmlToText = (html) => {
 };
 
 // ─── Send via Gmail HTTPS API (Direct OAuth2) ──────────────
-const sendViaGmailApi = async ({ to, subject, html, text }) => {
+const sendViaGmailApi = async ({ to, subject, html, text, attachments }) => {
   const { GOOGLE_USER, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = process.env;
 
   console.log('[email] Gmail API env check:', {
     hasUser: !!GOOGLE_USER,
     hasClientId: !!GOOGLE_CLIENT_ID,
     hasClientSecret: !!GOOGLE_CLIENT_SECRET,
-    hasRefreshToken: !!GOOGLE_REFRESH_TOKEN
+    hasRefreshToken: !!GOOGLE_REFRESH_TOKEN,
+    hasAttachments: !!(attachments && attachments.length > 0)
   });
 
   if (!GOOGLE_USER || !GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) {
@@ -1338,33 +1339,89 @@ const sendViaGmailApi = async ({ to, subject, html, text }) => {
 
     const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
 
-    const boundary = `mixed_${Buffer.from(`${to}${subject}`).toString('hex').slice(0, 24)}`;
+    // Fetch attachment if any
+    let attachmentPart = '';
+    if (attachments && attachments.length > 0) {
+      try {
+        const att = attachments[0];
+        let contentBase64 = '';
+        if (att.path && att.path.startsWith('http')) {
+          const response = await fetch(att.path);
+          const arrayBuffer = await response.arrayBuffer();
+          contentBase64 = Buffer.from(arrayBuffer).toString('base64');
+        } else if (att.content) {
+          contentBase64 = Buffer.from(att.content).toString('base64');
+        }
+        
+        if (contentBase64) {
+          attachmentPart = [
+            `Content-Type: application/pdf; name="${att.filename || 'invoice.pdf'}"`,
+            `Content-Disposition: attachment; filename="${att.filename || 'invoice.pdf'}"`,
+            'Content-Transfer-Encoding: base64',
+            '',
+            contentBase64,
+            ''
+          ].join('\r\n');
+        }
+      } catch (e) {
+        console.error('[email] Failed to download attachment for Gmail API:', e);
+      }
+    }
+
+    const mainBoundary = `mixed_${Buffer.from(`${to}${subject}`).toString('hex').slice(0, 24)}`;
+    const alternativeBoundary = `alt_${Buffer.from(`${to}${subject}`).toString('hex').slice(0, 24)}`;
     const fromName = process.env.MAIL_BRAND_NAME || 'MEDPARK Hospital';
     const replyTo = process.env.MAIL_REPLY_TO || process.env.MAIL_SUPPORT_EMAIL || GOOGLE_USER;
 
-    const messageParts = [
-      `From: ${fromName} <${GOOGLE_USER}>`,
-      `To: ${to}`,
-      `Reply-To: ${replyTo}`,
-      `Subject: ${utf8Subject}`,
-      'MIME-Version: 1.0',
-      'Auto-Submitted: auto-generated',
-      `Content-Type: multipart/alternative; boundary="${boundary}"`,
-      '',
-      `--${boundary}`,
-      'Content-Type: text/plain; charset=utf-8',
-      'Content-Transfer-Encoding: 7bit',
-      '',
-      text,
-      '',
-      `--${boundary}`,
-      'Content-Type: text/html; charset=utf-8',
-      'Content-Transfer-Encoding: 7bit',
-      '',
-      html,
-      '',
-      `--${boundary}--`
-    ];
+    const messageParts = [];
+    messageParts.push(`From: ${fromName} <${GOOGLE_USER}>`);
+    messageParts.push(`To: ${to}`);
+    messageParts.push(`Reply-To: ${replyTo}`);
+    messageParts.push(`Subject: ${utf8Subject}`);
+    messageParts.push('MIME-Version: 1.0');
+    messageParts.push('Auto-Submitted: auto-generated');
+    
+    if (attachmentPart) {
+      messageParts.push(`Content-Type: multipart/mixed; boundary="${mainBoundary}"`);
+      messageParts.push('');
+      messageParts.push(`--${mainBoundary}`);
+      messageParts.push(`Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`);
+      messageParts.push('');
+      messageParts.push(`--${alternativeBoundary}`);
+      messageParts.push('Content-Type: text/plain; charset=utf-8');
+      messageParts.push('Content-Transfer-Encoding: 7bit');
+      messageParts.push('');
+      messageParts.push(text);
+      messageParts.push('');
+      messageParts.push(`--${alternativeBoundary}`);
+      messageParts.push('Content-Type: text/html; charset=utf-8');
+      messageParts.push('Content-Transfer-Encoding: 7bit');
+      messageParts.push('');
+      messageParts.push(html);
+      messageParts.push('');
+      messageParts.push(`--${alternativeBoundary}--`);
+      messageParts.push('');
+      messageParts.push(`--${mainBoundary}`);
+      messageParts.push(attachmentPart);
+      messageParts.push(`--${mainBoundary}--`);
+    } else {
+      messageParts.push(`Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`);
+      messageParts.push('');
+      messageParts.push(`--${alternativeBoundary}`);
+      messageParts.push('Content-Type: text/plain; charset=utf-8');
+      messageParts.push('Content-Transfer-Encoding: 7bit');
+      messageParts.push('');
+      messageParts.push(text);
+      messageParts.push('');
+      messageParts.push(`--${alternativeBoundary}`);
+      messageParts.push('Content-Type: text/html; charset=utf-8');
+      messageParts.push('Content-Transfer-Encoding: 7bit');
+      messageParts.push('');
+      messageParts.push(html);
+      messageParts.push('');
+      messageParts.push(`--${alternativeBoundary}--`);
+    }
+
     const message = messageParts.join('\r\n');
 
     const encodedMessage = Buffer.from(message)
@@ -1400,7 +1457,7 @@ const sendViaGmailApi = async ({ to, subject, html, text }) => {
 };
 
 // ─── Main send function ──────────────────────────────────────
-const send = async ({ to, subject, html, text }) => {
+const send = async ({ to, subject, html, text, attachments }) => {
   const recipient = String(to || '').trim();
   console.log('[email] send called:', { to: recipient, subject });
 
@@ -1411,7 +1468,7 @@ const send = async ({ to, subject, html, text }) => {
 
   const plain = text || htmlToText(html);
 
-  const gmailApiResult = await sendViaGmailApi({ to: recipient, subject, html, text: plain });
+  const gmailApiResult = await sendViaGmailApi({ to: recipient, subject, html, text: plain, attachments });
   console.log('[email] Gmail API result:', gmailApiResult);
   if (gmailApiResult && !gmailApiResult.error) {
     return gmailApiResult;
@@ -1432,6 +1489,7 @@ const send = async ({ to, subject, html, text }) => {
       subject,
       text: plain,
       html,
+      attachments: attachments || undefined,
       headers: { 'Auto-Submitted': 'auto-generated' }
     });
 
@@ -1458,6 +1516,19 @@ const sendScheduleInvite = ({ to, contactName, hospitalName, token }) => {
 };
 
 const sendDemoConfirmation = ({ to, ...vars }) => send({ to, ...templates.demoConfirmation(vars) });
+
+const sendInvoicePaidEmail = ({ to, ...vars }) => {
+  const mailOptions = { to, ...templates.invoicePaidEmail(vars) };
+  if (vars.invoicePdfUrl) {
+    mailOptions.attachments = [
+      {
+        filename: `invoice_${vars.invoiceId || Date.now()}.pdf`,
+        path: vars.invoicePdfUrl
+      }
+    ];
+  }
+  return send(mailOptions);
+};
 const sendMeetingLink = ({ to, ...vars }) => send({ to, ...templates.meetingLinkReady(vars) });
 const sendFeedbackRequest = ({ to, ...vars }) => send({ to, ...templates.feedbackRequest(vars) });
 const sendRegistrationReceived = ({ to, ...vars }) => send({ to, ...templates.registrationReceived(vars) });
@@ -1626,4 +1697,5 @@ module.exports = {
   sendOtpEmail,
   profileUpdated,
   sendProfileUpdatedEmail,
+  sendInvoicePaidEmail,
 };

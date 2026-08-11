@@ -1450,6 +1450,7 @@ const FRONTEND_REDIRECT_URL =
 
 // ─── Logo URL ──────────────────────────────────────────────────
 const LOGO_URL = process.env.LOGO_URL || 'https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQMecZbRGOWSVBhV6P6UB-isBIqE4YVzkJRsIkXk5A8gDryrVw5';
+const { broadcast } = require('../services/websocketService'); // at the top
 
 // ─── Inspirational Quotes ──────────────────────────────────────
 const getRandomQuote = () => {
@@ -1781,6 +1782,52 @@ const getJoinText = (link) => {
   return '🔗 Join Meeting';
 };
 
+// const demoConfirmation = ({ contactName, hospitalName, scheduledAt, meetingLink, invoicePdfUrl }) => {
+//   const date = scheduledAt ? new Date(scheduledAt) : null;
+//   const formattedDate = date ? date.toLocaleDateString('en-US', {
+//     weekday: 'long',
+//     year: 'numeric',
+//     month: 'long',
+//     day: 'numeric'
+//   }) : 'To be confirmed';
+//   const formattedTime = date ? date.toLocaleTimeString('en-US', {
+//     hour: '2-digit',
+//     minute: '2-digit',
+//     timeZone: 'Asia/Kolkata'
+//   }) : '';
+
+//   return {
+//     subject: '✅ Your Demo is Confirmed!',
+//     html: shell({
+//       heading: 'Demo Confirmed',
+//       intro: `Hi ${contactName || 'there'}, your demo has been scheduled successfully.`,
+//       bodyHtml: `
+//         <p style="margin: 0 0 14px 0;">Your demo for <strong>${escapeHtml(hospitalName || 'your hospital')}</strong> is confirmed.</p>
+//         ${detailRows([
+//           ['Hospital', hospitalName],
+//           ['📅 Date', formattedDate],
+//           ['⏰ Time', formattedTime + ' (IST)'],
+//           ['⏱️ Duration', '30 minutes'],
+//           ['👤 Contact', contactName]
+//         ])}
+//         ${meetingLink ? `
+//           <div style="background: #dbeafe; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid ${C.blue};">
+//             <p style="margin: 0 0 5px 0;"><strong>🔗 Meeting Link:</strong></p>
+//             <p style="margin: 5px 0; word-break: break-all;">
+//               <a href="${meetingLink}" style="color: ${C.blue}; text-decoration: none; font-weight: 600;" target="_blank">${meetingLink}</a>
+//             </p>
+//           </div>
+//           ${button(meetingLink, getJoinText(meetingLink))}
+//           <p style="margin: 10px 0 0 0; font-size: 13px; color: #64748b;">📌 Please join 5 minutes before the scheduled time.</p>
+//         ` : ''}
+//       `,
+//       showQuote: true
+//     })
+//   };
+// };
+
+
+
 const demoConfirmation = ({ contactName, hospitalName, scheduledAt, meetingLink }) => {
   const date = scheduledAt ? new Date(scheduledAt) : null;
   const formattedDate = date ? date.toLocaleDateString('en-US', {
@@ -1824,6 +1871,47 @@ const demoConfirmation = ({ contactName, hospitalName, scheduledAt, meetingLink 
     })
   };
 };
+
+const invoicePaidEmail = ({ contactName, hospitalName, invoicePdfUrl, phone, email, amount, currency, invoiceId }) => {
+  const displayAmount = amount ? `${(amount / 100).toFixed(2)} ${String(currency || 'USD').toUpperCase()}` : '';
+
+  return {
+    subject: '🧾 Payment Receipt & Invoice - MEDPARK Hospital',
+    html: shell({
+      heading: 'Payment Receipt',
+      intro: `Hi ${contactName || 'there'}, your payment has been processed successfully.`,
+      bodyHtml: `
+        <p style="margin: 0 0 14px 0;">Thank you for your payment. Please find the details of your payment below.</p>
+        
+        <h3 style="color: #1e3a8a; margin-top: 20px; margin-bottom: 10px; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px;">👤 User Information</h3>
+        ${detailRows([
+          ['Hospital Name', hospitalName],
+          ['Contact Person', contactName],
+          ['Email Address', email || ''],
+          ['Phone Number', phone || 'N/A']
+        ])}
+
+        <h3 style="color: #1e3a8a; margin-top: 20px; margin-bottom: 10px; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px;">💳 Payment Information</h3>
+        ${detailRows([
+          ['Amount Paid', displayAmount],
+          ['Payment Status', 'Paid (Stripe)'],
+          ['Invoice Number', invoiceId || 'N/A']
+        ])}
+
+        ${invoicePdfUrl ? `
+          <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e9ecef;">
+            <p style="margin: 0 0 8px 0; font-weight: 600;">🧾 PDF Invoice</p>
+            ${button(invoicePdfUrl, '📄 Download PDF Invoice')}
+          </div>
+        ` : ''}
+      `,
+      showQuote: true
+    })
+  };
+};
+
+
+
 const meetingLinkReady = ({ contactName, hospitalName, scheduledAt, meetingLink }) => ({
   subject: '🔗 Your Meeting Link is Ready',
   html: shell({
@@ -2318,4 +2406,5 @@ module.exports = {
   appointmentFeedbackInvitation,
   profileUpdated,
   otpVerification, 
+  invoicePaidEmail,
 };

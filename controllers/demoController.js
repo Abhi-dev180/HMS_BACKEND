@@ -713,25 +713,47 @@ const deleteBooking = async (req, res) => {
 // ─── NEW: Cal.com Webhook to save the Zoom Link AND SEND EMAIL ──
 const handleCalWebhook = async (req, res) => {
   try {
-    const payload = req.body;
-    const zoomLink = payload.location; 
-    const email = payload.email;
-    const scheduledAt = payload.startTime;
+    console.log('[demo] Cal.com Webhook received. Body:', JSON.stringify(req.body, null, 2));
+    
+    const body = req.body;
+    const payload = body.payload || body;
+
+    const zoomLink = payload.location || payload.meetingUrl || payload.videoCallUrl;
+    let email = payload.email;
+    if (!email && payload.attendees && payload.attendees.length > 0) {
+      email = payload.attendees[0].email;
+    }
+    const scheduledAt = payload.startTime || payload.start;
 
     if (!zoomLink || !email) {
+      console.warn('[demo] Webhook missing email or link:', { email, zoomLink });
       return res.status(400).json({ message: 'Missing email or meeting link' });
     }
 
-    // 1. Update the demo_bookings table, FORCE overwriting whatever is in meeting_link
+    // 1. Find the latest booking for this email to update
+    const { data: latestBooking, error: findError } = await supabase
+      .from(TABLE)
+      .select('id, contact_name, hospital_name, status')
+      .eq('email', email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (findError || !latestBooking) {
+      console.error('[demo] Webhook: No booking found for email:', email, findError);
+      return res.status(404).json({ message: 'No booking found for email' });
+    }
+
+    // 2. Update the demo_bookings table, FORCE overwriting whatever is in meeting_link
     const { error, data } = await supabase
       .from(TABLE)
       .update({ 
         meeting_link: zoomLink, 
         status: 'scheduled',
+        scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
         updated_at: new Date().toISOString()
       })
-      .eq('email', email)
-      .eq('scheduled_at', new Date(scheduledAt).toISOString()) // Match by exact date/time instead of status
+      .eq('id', latestBooking.id)
       .select()
       .single();
 
@@ -740,14 +762,14 @@ const handleCalWebhook = async (req, res) => {
       return res.status(500).json({ message: 'DB Update Failed' });
     }
 
-    // 2. Trigger the EMAIL now that the Zoom link exists
+    // 3. Trigger the EMAIL now that the Zoom link exists
     if (email && data) {
       const { sendDemoConfirmation } = require('../services/emailService');
       await sendDemoConfirmation({
         to: email,
         contactName: data.contact_name,
         hospitalName: data.hospital_name,
-        scheduledAt: scheduledAt,
+        scheduledAt: data.scheduled_at,
         meetingLink: zoomLink 
       }).catch(e => console.error('[demo] confirmation email failed:', e));
     }

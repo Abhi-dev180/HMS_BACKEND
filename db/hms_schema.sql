@@ -119,3 +119,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT; -- optional, but we use m
 
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+
+ALTER TABLE public.demo_bookings 
+ADD COLUMN stripe_session_id TEXT,
+ADD COLUMN stripe_invoice_id TEXT,
+ADD COLUMN amount INTEGER DEFAULT 0,
+ADD COLUMN currency TEXT DEFAULT 'usd';
+
+ALTER TABLE public.demo_bookings 
+ADD COLUMN IF NOT EXISTS stripe_invoice_id TEXT DEFAULT NULL;
