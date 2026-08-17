@@ -116,4 +116,310 @@ router.post('/create-checkout-session', async (req, res) => {
   }
 });
 
+// ─── PayPal Routes ─────────────────────────────────────────────
+const paypalSvc = require('../services/paypalService');
+const razorpaySvc = require('../services/razorpayService');
+const { generateInvoice } = require('../services/invoiceService');
+const emailSvc = require('../services/emailService');
+const { broadcast } = require('../services/websocketService');
+
+router.post('/paypal/create-order', async (req, res) => {
+  try {
+    const { booking, planKey, returnUrl, cancelUrl } = req.body;
+    
+    // Prevent double payments
+    if (booking?.id && isValidUUID(booking.id)) {
+      const { data: dbPayment } = await supabase
+        .from('payments')
+        .select('status')
+        .eq('booking_id', booking.id)
+        .eq('status', 'paid')
+        .maybeSingle();
+      if (dbPayment) {
+        return res.status(400).json({ message: 'Payment already completed for this booking' });
+      }
+    }
+
+    const plan = PLANS[planKey] || PLANS['basic'];
+    const order = await paypalSvc.createOrder({ booking, planKey, amount: plan.amount, returnUrl, cancelUrl });
+    
+    if (booking?.id && isValidUUID(booking.id)) {
+      await supabase.from('payments').insert({
+        booking_id: booking.id,
+        email: booking.email || 'customer@example.com',
+        paypal_order_id: order.id,
+        plan_key: planKey || 'basic',
+        amount: plan.amount,
+        currency: 'usd',
+        status: 'pending'
+      });
+    }
+
+    res.json(order);
+  } catch (error) {
+    console.error('[PayPal] create order error:', error);
+    res.status(500).json({ message: 'Failed to create PayPal order' });
+  }
+});
+
+router.post('/paypal/capture-order', async (req, res) => {
+  try {
+    const { orderId, booking, planKey } = req.body;
+    const capture = await paypalSvc.captureOrder(orderId);
+    const plan = PLANS[planKey] || PLANS['basic'];
+
+    // Mark as completed in DB
+    let updatedDemo = null;
+    let validBookingId = booking?.id && isValidUUID(booking.id) ? booking.id : null;
+
+    if (validBookingId) {
+      const { data } = await supabase
+        .from("demo_bookings")
+        .update({
+          status: "completed",
+          stripe_invoice_id: capture.id, // using capture ID as transaction/billing ID
+          amount: plan.amount,
+          currency: 'usd',
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", validBookingId)
+        .select()
+        .single();
+      
+      updatedDemo = data;
+    }
+
+    // Update record in payments table so SuperAdmin UI sees it
+    const { data: updatedPay, error: updErr } = await supabase.from('payments').update({
+      stripe_session_id: capture.id,
+      status: 'paid'
+    }).eq('booking_id', validBookingId).select();
+    
+    if (updErr) console.error('[PayPal] Payment update error:', updErr);
+
+    // Fallback: If no pending payment existed to update, insert a new one
+    if (!updatedPay || updatedPay.length === 0) {
+      await supabase.from('payments').insert({
+        booking_id: validBookingId,
+        email: booking?.email || 'customer@example.com',
+        stripe_session_id: capture.id,
+        plan_key: planKey || 'basic',
+        amount: plan.amount,
+        currency: 'usd',
+        status: 'paid'
+      });
+    }
+
+    const startDate = new Date().toLocaleDateString();
+    const endDate = new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString();
+
+    // Generate Invoice
+    const invoicePdfBuffer = await generateInvoice({
+      hospitalName: booking.hospital_name || 'Hospital',
+      contactName: booking.contact_name || 'User',
+      phone: booking.phone || '',
+      email: booking.email || 'customer@example.com',
+      planName: plan.name,
+      amount: plan.amount,
+      paymentMethod: 'PayPal',
+      transactionId: capture.id,
+      date: new Date().toLocaleDateString(),
+      startDate,
+      endDate
+    });
+
+    // Send Invoice Email to Customer
+    await emailSvc.sendInvoicePaidEmail({
+      to: booking.email,
+      contactName: booking.contact_name || 'User',
+      hospitalName: booking.hospital_name || 'Hospital',
+      phone: booking.phone || '',
+      email: booking.email || 'customer@example.com',
+      planName: plan.name,
+      amount: plan.amount,
+      paymentMethod: 'PayPal',
+      invoiceId: capture.id,
+      startDate,
+      endDate,
+      invoicePdfBuffer
+    });
+
+    // Notify Superadmin
+    await emailSvc.sendPaymentReceivedToSuperAdmin({
+      hospitalName: booking.hospital_name || 'Hospital',
+      contactName: booking.contact_name || 'User',
+      email: booking.email || 'customer@example.com',
+      phone: booking.phone || '',
+      planName: plan.name,
+      amount: plan.amount,
+      paymentMethod: 'PayPal',
+      invoiceId: capture.id,
+      startDate,
+      endDate
+    });
+
+    if (updatedDemo) {
+      broadcast('demo_updated', updatedDemo);
+    }
+
+    res.json({ success: true, capture });
+  } catch (error) {
+    console.error('[PayPal] capture order error:', error);
+    res.status(500).json({ message: 'Failed to capture PayPal order' });
+  }
+});
+
+// ─── Razorpay Routes ───────────────────────────────────────────
+router.post('/razorpay/create-order', async (req, res) => {
+  try {
+    const { booking, planKey } = req.body;
+
+    // Prevent double payments
+    if (booking?.id && isValidUUID(booking.id)) {
+      const { data: dbPayment } = await supabase
+        .from('payments')
+        .select('status')
+        .eq('booking_id', booking.id)
+        .eq('status', 'paid')
+        .maybeSingle();
+      if (dbPayment) {
+        return res.status(400).json({ message: 'Payment already completed for this booking' });
+      }
+    }
+
+    const plan = PLANS[planKey] || PLANS['basic'];
+    const order = await razorpaySvc.createOrder({ booking, planKey, amount: plan.amount });
+    
+    if (booking?.id && isValidUUID(booking.id)) {
+      await supabase.from('payments').insert({
+        booking_id: booking.id,
+        email: booking.email || 'customer@example.com',
+        razorpay_order_id: order.id,
+        plan_key: planKey || 'basic',
+        amount: plan.amount,
+        currency: 'usd',
+        status: 'pending'
+      });
+    }
+
+    res.json(order);
+  } catch (error) {
+    console.error('[Razorpay] create order error:', error);
+    res.status(500).json({ message: 'Failed to create Razorpay order' });
+  }
+});
+
+router.post('/razorpay/verify-payment', async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, booking, planKey } = req.body;
+    
+    const isValid = razorpaySvc.verifyPayment(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+    if (!isValid) {
+      return res.status(400).json({ message: 'Invalid signature' });
+    }
+
+    const plan = PLANS[planKey] || PLANS['basic'];
+    const transactionId = razorpay_payment_id || `DUMMY_${Date.now()}`;
+
+    // Mark as completed in DB
+    let updatedDemo = null;
+    let validBookingId = booking?.id && isValidUUID(booking.id) ? booking.id : null;
+
+    if (validBookingId) {
+      const { data } = await supabase
+        .from("demo_bookings")
+        .update({
+          status: "completed",
+          stripe_invoice_id: transactionId, 
+          amount: plan.amount,
+          currency: 'usd',
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", validBookingId)
+        .select()
+        .single();
+        
+      updatedDemo = data;
+    }
+
+    // Update record in payments table so SuperAdmin UI sees it
+    const { data: updatedPay, error: updErr } = await supabase.from('payments').update({
+      stripe_session_id: transactionId,
+      status: 'paid'
+    }).eq('booking_id', validBookingId).select();
+    
+    if (updErr) console.error('[Razorpay] Payment update error:', updErr);
+
+    // Fallback: If no pending payment existed to update, insert a new one
+    if (!updatedPay || updatedPay.length === 0) {
+      await supabase.from('payments').insert({
+        booking_id: validBookingId,
+        email: booking?.email || 'customer@example.com',
+        stripe_session_id: transactionId,
+        plan_key: planKey || 'basic',
+        amount: plan.amount,
+        currency: 'usd',
+        status: 'paid'
+      });
+    }
+
+    const startDate = new Date().toLocaleDateString();
+    const endDate = new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString();
+
+    // Generate Invoice
+    const invoicePdfBuffer = await generateInvoice({
+      hospitalName: booking.hospital_name || 'Hospital',
+      contactName: booking.contact_name || 'User',
+      phone: booking.phone || '',
+      email: booking.email || 'customer@example.com',
+      planName: plan.name,
+      amount: plan.amount,
+      paymentMethod: 'Razorpay UPI',
+      transactionId,
+      date: new Date().toLocaleDateString(),
+      startDate,
+      endDate
+    });
+
+    // Send Invoice Email to Customer
+    await emailSvc.sendInvoicePaidEmail({
+      to: booking.email,
+      contactName: booking.contact_name || 'User',
+      hospitalName: booking.hospital_name || 'Hospital',
+      phone: booking.phone || '',
+      email: booking.email || 'customer@example.com',
+      planName: plan.name,
+      amount: plan.amount,
+      paymentMethod: 'Razorpay UPI',
+      invoiceId: transactionId,
+      startDate,
+      endDate,
+      invoicePdfBuffer
+    });
+
+    // Notify Superadmin
+    await emailSvc.sendPaymentReceivedToSuperAdmin({
+      hospitalName: booking.hospital_name || 'Hospital',
+      contactName: booking.contact_name || 'User',
+      email: booking.email || 'customer@example.com',
+      phone: booking.phone || '',
+      planName: plan.name,
+      amount: plan.amount,
+      paymentMethod: 'Razorpay UPI',
+      invoiceId: transactionId,
+      startDate,
+      endDate
+    });
+
+    if (updatedDemo) {
+      broadcast('demo_updated', updatedDemo);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Razorpay] verify payment error:', error);
+    res.status(500).json({ message: 'Failed to verify payment' });
+  }
+});
+
 module.exports = router;

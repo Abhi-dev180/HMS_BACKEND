@@ -24,9 +24,12 @@ const getFeedbackInfo = async (req, res) => {
     .maybeSingle();
 
   return res.json({
-    booking: { hospitalName: booking.hospital_name, 
-    contactName: booking.contact_name,
-    email: booking.email,},
+    booking: { 
+      id: booking.id,
+      hospitalName: booking.hospital_name, 
+      contactName: booking.contact_name,
+      email: booking.email
+    },
     alreadySubmitted: !!existing,
     stripeEnabled: stripeSvc.isConfigured(),
     price: { amount: stripeSvc.AMOUNT, currency: stripeSvc.CURRENCY }

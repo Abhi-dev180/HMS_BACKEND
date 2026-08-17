@@ -5,34 +5,6 @@ const GOOGLE_CALENDAR_API_KEY = process.env.GOOGLE_CALENDAR_API_KEY;
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || process.env.GOOGLE_USER || 'primary';
 const TIMEZONE = process.env.GOOGLE_CALENDAR_TIMEZONE || 'Asia/Calcutta';
 
-/* *Fetch access token via Google OAuth2 Refresh Token */
-// const getGoogleAccessToken = async () => {
-//   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = process.env;
-//   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) return null;
-
-//   try {
-//     const res = await fetch('https://oauth2.googleapis.com/token', {
-//       method: 'POST',
-//       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-//       body: new URLSearchParams({
-//         client_id: GOOGLE_CLIENT_ID,
-//         client_secret: GOOGLE_CLIENT_SECRET,
-//         refresh_token: GOOGLE_REFRESH_TOKEN,
-//         grant_type: 'refresh_token'
-//       })
-//     });
-//     if (res.ok) {
-//       const data = await res.json();
-//       return data.access_token;
-//     }
-//   } catch (err) {
-//     console.error('[googleCalendarService] OAuth token fetch error:', err);
-//   }
-//   return null;
-// };
-
-
-
 const getGoogleAccessToken = async () => {
   const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN;
   const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;

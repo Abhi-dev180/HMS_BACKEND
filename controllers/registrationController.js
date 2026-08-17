@@ -266,6 +266,15 @@ const updateRegistrationStatus = async (req, res) => {
         payment = p2.data || null;
       }
 
+      // Update payment with the user_id now that the user is created
+      if (payment && !payment.user_id) {
+        const { error: payUpdErr } = await supabase.from('payments').update({
+          user_id: user.id,
+          updated_at: new Date().toISOString()
+        }).eq('id', payment.id);
+        if (payUpdErr) console.error('[registrations] Failed to update payment user_id:', payUpdErr);
+      }
+
       if (!payment) {
         console.warn('[registrations] No payment found for registration:', reg.id);
       } else {

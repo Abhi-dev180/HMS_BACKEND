@@ -17,17 +17,32 @@ const createSubscription = async (req, res) => {
       return res.status(400).json({ message: 'planKey is required' });
     }
 
-    // Allow caller to override the success/cancel redirect paths (used when
-    // subscribing as part of a registration funnel to land back on /register).
     const successPath = req.body.successPath || '/dashboard';
     const cancelPath = req.body.cancelPath || '/pricing';
+
+    // Fetch latest demo booking for the user
+    let bookingDetails = null;
+    const { data: user } = await supabase.from('users').select('email').eq('id', userId).single();
+    if (user && user.email) {
+      const { data: latestBooking } = await supabase
+        .from('demo_bookings')
+        .select('*')
+        .eq('email', user.email)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestBooking) {
+        bookingDetails = latestBooking;
+      }
+    }
 
     const session = await stripeSvc.createSubscriptionCheckout({
       userId,
       hospitalId,
       planKey,
       successPath,
-      cancelPath
+      cancelPath,
+      booking: bookingDetails
     });
 
     // Save payment intent to track

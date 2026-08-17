@@ -50,4 +50,20 @@ const isSlotValid = (iso, takenIso = []) => {
   return generateSlots().some((s) => s.getTime() === t);
 };
 
-module.exports = { generateSlots, slotsWithStatus, availableSlots, isSlotValid };
+const getDailyTimeSlots = () => {
+  const slots = [];
+  for (let h = START_HOUR; h <= END_HOUR; h += 1) {
+    if (h === END_HOUR) {
+      slots.push(`${h.toString().padStart(2, '0')}:00`); // Only include the exact end hour
+      break;
+    }
+    for (let m = 0; m < 60; m += STEP_MIN) {
+      const hour = h.toString().padStart(2, '0');
+      const min = m.toString().padStart(2, '0');
+      slots.push(`${hour}:${min}`);
+    }
+  }
+  return slots;
+};
+
+module.exports = { generateSlots, slotsWithStatus, availableSlots, isSlotValid, getDailyTimeSlots };
