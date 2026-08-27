@@ -1,6 +1,7 @@
 const { supabase } = require('../config/supabase');
 const { sendDemoReceived, sendScheduleInvite, sendFeedbackRequest } = require('../services/emailService');
 const { broadcast } = require('../services/websocketService');
+const { readDB, writeDB } = require('../models');
 
 const TABLE = 'demo_bookings';
 
@@ -24,18 +25,22 @@ const createBooking = async (req, res) => {
       feedback_token: token,
       status: 'requested'
     };
-    // Add message if provided (column exists)
     if (message) insertData.message = message;
 
-    const { data, error } = await supabase
-      .from(TABLE)
-      .insert(insertData)
-      .select()
-      .single();
+    let data = null;
+    if (supabase) {
+      try {
+        const resInsert = await supabase.from(TABLE).insert(insertData).select().single();
+        if (!resInsert.error && resInsert.data) data = resInsert.data;
+      } catch (e) {}
+    }
 
-    if (error) {
-      console.error('[demo] createBooking insert error:', error);
-      return res.status(500).json({ message: 'Could not create booking' });
+    if (!data) {
+      const db = readDB();
+      db.demos = db.demos || [];
+      data = { id: Date.now().toString(), ...insertData, created_at: new Date().toISOString() };
+      db.demos.unshift(data);
+      writeDB(db);
     }
 
     // Send immediate email with scheduling link
@@ -45,7 +50,7 @@ const createBooking = async (req, res) => {
       hospitalName,
       token,
       bookingId: data.id
-    });
+    }).catch((e) => console.error('[demo] sendDemoReceived failed:', e));
 
     broadcast('demo_created', data);
     return res.status(201).json({

@@ -1,14 +1,21 @@
 
 const { supabase, isConfigured } = require('../config/supabase');
+const { readDB } = require('../models');
+
+const isNetErr = (err) =>
+  /fetch failed|timeout|ENOTFOUND|ECONNREFUSED|UND_ERR/i.test(String(err && (err.message || err.details || err)));
+
 const countRows = async (table, apply) => {
-  let q = supabase.from(table).select('*', { count: 'exact', head: true });
-  if (apply) q = apply(q);
-  const { count, error } = await q;
-  if (error) {
-    console.error(`[stats] count ${table} error:`, error.message);
-    return 0;
+  if (supabase) {
+    try {
+      let q = supabase.from(table).select('*', { count: 'exact', head: true });
+      if (apply) q = apply(q);
+      const { count, error } = await q;
+      if (!error && count !== null && count !== undefined) return count;
+      if (error && !isNetErr(error)) console.error(`[stats] count ${table} error:`, error.message);
+    } catch (e) {}
   }
-  return count || 0;
+  return null;
 };
 
 const startOfTodayISO = () => {
@@ -24,15 +31,13 @@ const startOfMonthISO = () => {
 
 // GET /api/stats/overview  (superadmin & admin)
 const getOverviewStats = async (req, res) => {
-  if (!isConfigured()) {
-    return res.status(503).json({ message: 'Statistics are unavailable until Supabase is configured.' });
-  }
-
   const today = startOfTodayISO();
   const monthStart = startOfMonthISO();
 
   try {
-    const [
+    const db = readDB();
+
+    let [
       registrationsTotal,
       registrationsPending,
       registrationsApproved,
@@ -56,7 +61,6 @@ const getOverviewStats = async (req, res) => {
       contactsTotal,
       contactsNew,
 
-      // FIXED: Changed 'feedback' to 'appointment_feedbacks'
       feedbackTotal,
       feedbackPending,
 
@@ -88,7 +92,6 @@ const getOverviewStats = async (req, res) => {
       countRows('contacts', (q) => q.eq('status', 'new')),
 
       countRows('appointment_feedbacks'),
-      // 'feedbackStatus' = 'Pending'
       countRows('appointment_feedbacks', (q) => q.eq('feedbackStatus', 'Pending')),
 
       countRows('hospitals'),
@@ -96,46 +99,90 @@ const getOverviewStats = async (req, res) => {
       countRows('users', (q) => q.eq('role', 'admin'))
     ]);
 
+    // Fallback to local db.json counts if Supabase returned null
+    const appts = db.appointments || [];
+    const users = db.users || [];
+    const hospitals = db.hospitals || [];
+    const contacts = db.contacts || [];
+    const feedbacks = db.feedbacks || [];
+
+    if (bookingsTotal === null) {
+      bookingsTotal = appts.length;
+      bookingsPending = appts.filter((a) => a.status === 'Pending').length;
+      bookingsConfirmed = appts.filter((a) => a.status === 'Confirmed').length;
+      bookingsCompleted = appts.filter((a) => a.status === 'Completed').length;
+      bookingsCancelled = appts.filter((a) => a.status === 'Cancelled').length;
+      bookingsToday = appts.filter((a) => a.createdAt >= today).length;
+      bookingsThisMonth = appts.filter((a) => a.createdAt >= monthStart).length;
+    }
+    if (hospitalsTotal === null) hospitalsTotal = hospitals.length;
+    if (usersTotal === null) usersTotal = users.length;
+    if (adminsTotal === null) adminsTotal = users.filter((u) => u.role === 'admin').length;
+    // Calculate merged contacts counts (Supabase + local db.json)
+    let mergedContacts = [];
+    if (supabase) {
+      try {
+        const { data } = await supabase.from('contacts').select('*');
+        if (Array.isArray(data)) mergedContacts = data;
+      } catch (e) {}
+    }
+    const localContacts = db.contacts || [];
+    const contactMap = new Map();
+    mergedContacts.forEach((c) => contactMap.set(String(c.id), c));
+    localContacts.forEach((c) => {
+      if (!contactMap.has(String(c.id))) {
+        contactMap.set(String(c.id), c);
+      }
+    });
+    const allContacts = Array.from(contactMap.values());
+    contactsTotal = allContacts.length;
+    contactsNew = allContacts.filter((c) => (c.status || 'new') === 'new').length;
+
+    if (feedbackTotal === null) {
+      feedbackTotal = feedbacks.length;
+      feedbackPending = feedbacks.filter((f) => f.status === 'Pending').length;
+    }
+
     return res.json({
       generatedAt: new Date().toISOString(),
       registrations: {
-        total: registrationsTotal,
-        pending: registrationsPending,
-        approved: registrationsApproved,
-        denied: registrationsDenied,
-        today: registrationsToday,
-        thisMonth: registrationsThisMonth
+        total: registrationsTotal || 0,
+        pending: registrationsPending || 0,
+        approved: registrationsApproved || 0,
+        denied: registrationsDenied || 0,
+        today: registrationsToday || 0,
+        thisMonth: registrationsThisMonth || 0
       },
       bookings: {
-        total: bookingsTotal,
-        pending: bookingsPending,
-        confirmed: bookingsConfirmed,
-        completed: bookingsCompleted,
-        cancelled: bookingsCancelled,
-        today: bookingsToday,
-        thisMonth: bookingsThisMonth
+        total: bookingsTotal || 0,
+        pending: bookingsPending || 0,
+        confirmed: bookingsConfirmed || 0,
+        completed: bookingsCompleted || 0,
+        cancelled: bookingsCancelled || 0,
+        today: bookingsToday || 0,
+        thisMonth: bookingsThisMonth || 0
       },
       appointments: {
-        pending: bookingsPending
+        pending: bookingsPending || 0
       },
       demos: {
-        total: demosTotal,
-        requested: demosRequested,
-        scheduled: demosScheduled,
-        completed: demosCompleted
+        total: demosTotal || 0,
+        requested: demosRequested || 0,
+        scheduled: demosScheduled || 0,
+        completed: demosCompleted || 0
       },
       contacts: {
-        total: contactsTotal,
-        new: contactsNew
+        total: contactsTotal || 0,
+        new: contactsNew || 0
       },
       feedback: {
-        total: feedbackTotal,
-        unread: feedbackPending
+        total: feedbackTotal || 0,
+        unread: feedbackPending || 0
       },
       network: {
-        hospitals: hospitalsTotal,
-        users: usersTotal,
-        admins: adminsTotal
+        hospitals: hospitalsTotal || 0,
+        users: usersTotal || 0,
+        admins: adminsTotal || 0
       }
     });
   } catch (err) {

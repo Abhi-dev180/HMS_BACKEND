@@ -10,7 +10,8 @@ const getDefaultDB = () => ({
   contacts: [],
   feedbacks: [],
   calls: [],
-  transcriptions: []
+  transcriptions: [],
+  subscriptions: []
 });
 
 const readDB = () => {
@@ -29,7 +30,8 @@ const readDB = () => {
       contacts: parsed.contacts || [],
       feedbacks: parsed.feedbacks || [],
       calls: parsed.calls || [],
-      transcriptions: parsed.transcriptions || []
+      transcriptions: parsed.transcriptions || [],
+      subscriptions: parsed.subscriptions || []
     };
   } catch (error) {
     console.error('Error reading db:', error);

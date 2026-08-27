@@ -60,9 +60,9 @@ if (GOOGLE_USER && GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REFRESH_TO
 } else {
   console.warn(
     '[email] No valid credentials found – emails will be logged and skipped.\n' +
-      'Set either:\n' +
-      '- GOOGLE_USER + GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET + GOOGLE_REFRESH_TOKEN (OAuth2), or\n' +
-      '- GMAIL_USER + GMAIL_APP_PASSWORD (App Password)'
+    'Set either:\n' +
+    '- GOOGLE_USER + GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET + GOOGLE_REFRESH_TOKEN (OAuth2), or\n' +
+    '- GMAIL_USER + GMAIL_APP_PASSWORD (App Password)'
   );
 }
 
@@ -177,10 +177,12 @@ const sendViaGmailApi = async ({ to, subject, html, text, attachments }) => {
           const response = await fetch(att.path);
           const arrayBuffer = await response.arrayBuffer();
           contentBase64 = Buffer.from(arrayBuffer).toString('base64');
+        } else if (att.path && att.path.includes('base64,')) {
+          contentBase64 = att.path.split('base64,')[1] || '';
         } else if (att.content) {
           contentBase64 = Buffer.from(att.content).toString('base64');
         }
-        
+
         if (contentBase64) {
           attachmentPart = [
             `Content-Type: application/pdf; name="${att.filename || 'invoice.pdf'}"`,
@@ -208,7 +210,7 @@ const sendViaGmailApi = async ({ to, subject, html, text, attachments }) => {
     messageParts.push(`Subject: ${utf8Subject}`);
     messageParts.push('MIME-Version: 1.0');
     messageParts.push('Auto-Submitted: auto-generated');
-    
+
     if (attachmentPart) {
       messageParts.push(`Content-Type: multipart/mixed; boundary="${mainBoundary}"`);
       messageParts.push('');
@@ -337,9 +339,9 @@ const sendDemoReceived = ({ to, ...vars }) => {
 
 const sendScheduleInvite = ({ to, contactName, hospitalName, token }) => {
   console.log('[email] sendScheduleInvite:', { to, contactName, hospitalName, token });
-  return send({ 
-    to, 
-    ...templates.scheduleInvite({ contactName, hospitalName, token }) 
+  return send({
+    to,
+    ...templates.scheduleInvite({ contactName, hospitalName, token })
   });
 };
 
@@ -434,9 +436,9 @@ const sendTestEmail = (to) =>
       bodyHtml: `
         <p style="margin:0 0 4px 0;">If you are reading this, the mail transport is working. No action is needed.</p>
         ${templates.detailRows([
-          ['Recipient', to],
-          ['Sent at', new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })]
-        ])}
+        ['Recipient', to],
+        ['Sent at', new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })]
+      ])}
       `,
       footNote: 'You are receiving this because a delivery test was triggered from the admin backend.'
     })
@@ -459,11 +461,11 @@ const profileUpdated = ({ name, email, changes, updatedAt }) => {
       bodyHtml: `
         <p style="margin: 0 0 14px 0;">Your profile has been successfully updated.</p>
         ${detailRows([
-          ['Name', name],
-          ['Email', email],
-          ['Changes made', changeList.length ? changeList.join(', ') : 'No changes recorded'],
-          ['Updated at', updatedAt ? new Date(updatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'Just now']
-        ])}
+        ['Name', name],
+        ['Email', email],
+        ['Changes made', changeList.length ? changeList.join(', ') : 'No changes recorded'],
+        ['Updated at', updatedAt ? new Date(updatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'Just now']
+      ])}
         <div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 12px 16px; border-radius: 6px; margin: 16px 0;">
           <p style="margin: 0; color: #991b1b; font-size: 14px; font-weight: 500;">
             ⚠️ If you didn't make these changes, please contact support immediately.
@@ -498,12 +500,163 @@ const profileUpdated = ({ name, email, changes, updatedAt }) => {
 // };
 
 
+// ─── Contact Reply Email with Cloudinary / Attachments ────────
+const sendContactReplyEmail = ({ to, name, subject, originalMessage, replyMessage, adminName, attachments = [] }) => {
+  const safeName = name || 'Valued Patient / Client';
+  const safeSubject = subject || 'Response to your inquiry';
+  const dateStr = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  let attachmentHtml = '';
+  if (attachments && attachments.length > 0) {
+    attachmentHtml = `
+      <div style="margin-top: 24px; padding: 16px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;">
+        <p style="margin: 0 0 10px 0; font-size: 13px; font-weight: 700; color: #1e293b; text-transform: uppercase; letter-spacing: 0.5px;">📎 Attached Files & Cloudinary Documents</p>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          ${attachments.map(att => `
+            <div style="padding: 10px 14px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px;">
+              📁 <strong style="color: #0f172a;">${att.filename || 'Attachment'}</strong>
+              ${att.url ? ` &nbsp;•&nbsp; <a href="${att.url}" target="_blank" style="color: #2563eb; text-decoration: underline; font-weight: 600;">Download / View File</a>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${safeSubject}</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #334155;">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed; background-color: #f1f5f9; padding: 30px 10px;">
+        <tr>
+          <td align="center">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 640px; background-color: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
+              
+              <!-- HEADER -->
+              <tr>
+                <td style="background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #2563eb 100%); padding: 36px 40px; text-align: left;">
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td>
+                        <div style="display: inline-block; background-color: rgba(255, 255, 255, 0.15); padding: 8px 16px; border-radius: 50px; backdrop-filter: blur(10px); margin-bottom: 12px;">
+                          <span style="color: #60a5fa; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;">MEDPARK CITY CENTER</span>
+                        </div>
+                        <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -0.5px; line-height: 1.2;">
+                          Response to Your Inquiry
+                        </h1>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- BODY -->
+              <tr>
+                <td style="padding: 40px;">
+                  <p style="font-size: 16px; color: #1e293b; font-weight: 700; margin: 0 0 16px 0;">
+                    Hello ${safeName},
+                  </p>
+                  <p style="font-size: 15px; color: #475569; line-height: 1.6; margin: 0 0 24px 0;">
+                    Thank you for reaching out to Medpark City Center. Our team has reviewed your message regarding <strong style="color: #0f172a;">"${safeSubject}"</strong> and we have provided our response below.
+                  </p>
+
+                  <!-- ADMIN RESPONSE CARD -->
+                  <div style="background-color: #eff6ff; border-left: 4px solid #2563eb; border-radius: 12px; padding: 24px; margin-bottom: 28px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                      <span style="font-size: 12px; font-weight: 800; color: #1d4ed8; text-transform: uppercase; letter-spacing: 0.5px;">🏥 Official Response</span>
+                      <span style="font-size: 12px; color: #64748b;">${dateStr}</span>
+                    </div>
+                    <div style="font-size: 15px; color: #1e293b; line-height: 1.7; white-space: pre-wrap;">${replyMessage}</div>
+                    ${adminName ? `<p style="margin: 16px 0 0 0; font-size: 13px; font-weight: 700; color: #2563eb;">— ${adminName}, Hospital Management</p>` : ''}
+                  </div>
+
+                  ${attachmentHtml}
+
+                  <!-- ORIGINAL MESSAGE QUOTE -->
+                  ${originalMessage ? `
+                  <div style="margin-top: 28px; padding: 20px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;">
+                    <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Your Original Message:</p>
+                    <p style="margin: 0; font-size: 14px; color: #475569; font-style: italic; line-height: 1.5; white-space: pre-wrap;">"${originalMessage}"</p>
+                  </div>
+                  ` : ''}
+
+                  <!-- CTA BUTTON -->
+                  <div style="margin-top: 36px; text-align: center;">
+                    <a href="https://hospital-management-sigma-six.vercel.app/contact" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 700; padding: 14px 32px; border-radius: 50px; box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);">
+                      Visit Medpark Portal
+                    </a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- FOOTER -->
+              <tr>
+                <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 24px 40px; text-align: center;">
+                  <p style="margin: 0 0 6px 0; font-size: 13px; font-weight: 700; color: #0f172a;">
+                    Medpark City Center & Healthcare Network
+                  </p>
+                  <p style="margin: 0 0 12px 0; font-size: 12px; color: #64748b;">
+                    24/7 Helpline: +91 9814538354 &nbsp;|&nbsp; Support: rajdevfree@gmail.com
+                  </p>
+                  <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+                    © ${new Date().getFullYear()} Medpark Hospital Management. All rights reserved.
+                  </p>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  const mailAttachments = (attachments || []).map((att) => {
+    if (att.url && att.url.trim()) return { filename: att.filename || 'attachment', path: att.url };
+    if (att.path && att.path.startsWith('http')) return { filename: att.filename || 'attachment', path: att.path };
+    if (att.data && att.data.includes('base64,')) {
+      const base64Data = att.data.split('base64,')[1];
+      return { filename: att.filename || 'attachment', content: Buffer.from(base64Data, 'base64') };
+    }
+    if (att.path && att.path.includes('base64,')) {
+      const base64Data = att.path.split('base64,')[1];
+      return { filename: att.filename || 'attachment', content: Buffer.from(base64Data, 'base64') };
+    }
+    if (att.content) return { filename: att.filename || 'attachment', content: att.content };
+    return null;
+  }).filter(Boolean);
+
+  return send({
+    to,
+    subject: `Re: ${safeSubject}`,
+    html,
+    attachments: mailAttachments
+  });
+};
+
 // ─── Profile Updated Email ──────────────────────────────────
 const sendProfileUpdatedEmail = ({ to, name, changes, updatedAt }) => {
   console.log('[email] sendProfileUpdatedEmail:', { to, name, changes });
-  return send({ to, ...templates.profileUpdated({ name, email: to, changes, updatedAt }) });
+  const formattedDate = updatedAt ? new Date(updatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'Just now';
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 12px;">
+      <h2 style="color: #1e40af; margin-bottom: 4px;">Profile Updated</h2>
+      <p style="color: #4b5563; margin-top: 4px;">Hello ${name || 'User'}, your profile has been successfully updated.</p>
+      <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;">
+        <p style="margin: 0 0 8px 0;"><strong>Changes made:</strong> ${changes || 'Profile details updated'}</p>
+        <p style="margin: 0;"><strong>Updated at:</strong> ${formattedDate}</p>
+      </div>
+      <p style="color: #6b7280; font-size: 12px; margin-top: 16px;">This is an automated confirmation from Medpark Hospital.</p>
+    </div>
+  `;
+  return send({ to, subject: 'Your Profile Has Been Updated', html });
 };
-
 
 module.exports = {
   send,
@@ -526,12 +679,13 @@ module.exports = {
   sendContactReceived,
   sendContactStatusUpdate,
   sendContactNewToSuperAdmin,
+  sendContactReplyEmail,
   sendSubscriptionExpiryReminder,
   sendSubscriptionExpired,
   getSuperAdminEmail,
   sendTestEmail,
   sendOtpEmail,
-  profileUpdated,
+  profileUpdated: sendProfileUpdatedEmail,
   sendProfileUpdatedEmail,
   sendInvoicePaidEmail,
   sendPaymentReceivedToSuperAdmin,

@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon server.js",
+    "dev": "nodemon --watch server.js --watch controllers --watch routes --watch services --watch middleware --watch models --ignore 'data/*' --ignore 'data/db.json' server.js",
     "start": "node server.js",
     "check": "node scripts/check-config.js",
     "add-superadmin": "node scripts/addSuperAdmin.js",

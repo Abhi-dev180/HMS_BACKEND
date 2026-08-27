@@ -1,6 +1,7 @@
 
 // controllers/appointmentController.js
 const { supabase } = require('../config/supabase');
+const { readDB, writeDB } = require('../models');
 const {
   sendAppointmentConfirmation,
   sendAppointmentStatusUpdate,
@@ -64,16 +65,30 @@ const sendFeedbackInvitation = async (appointment) => {
 
 // ─── Helper: get hospital name ────────────────────────────────
 const hospitalName = async (hospitalId) => {
-  const { data } = await supabase.from('hospitals').select('name').eq('id', hospitalId).limit(1);
-  return data && data[0] ? data[0].name : '';
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('hospitals').select('name').eq('id', hospitalId).limit(1);
+      if (!error && data && data[0]) return data[0].name;
+    } catch (e) { }
+  }
+  const db = readDB();
+  const h = (db.hospitals || []).find((x) => String(x.id) === String(hospitalId));
+  return h ? h.name : '';
 };
 
 // ─── Helper: get user email from appointment ──────────────────
 const getUserEmail = async (appointment) => {
   if (appointment.email) return appointment.email;
   if (appointment.userId) {
-    const { data } = await supabase.from('users').select('email').eq('id', appointment.userId).single();
-    return data?.email || null;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('users').select('email').eq('id', appointment.userId).single();
+        if (!error && data?.email) return data.email;
+      } catch (e) { }
+    }
+    const db = readDB();
+    const u = (db.users || []).find((x) => String(x.id) === String(appointment.userId));
+    return u?.email || null;
   }
   return null;
 };
@@ -297,10 +312,22 @@ const bookPublicAppointment = async (req, res) => {
     appointment_number: appointmentNumber
   };
 
-  const { data, error } = await supabase.from(T).insert(row).select().single();
-  if (error) {
-    console.error('[appointments] public book:', error);
-    return res.status(500).json({ message: 'Could not book appointment' });
+  let data = null;
+  if (supabase) {
+    try {
+      const res = await supabase.from(T).insert(row).select().single();
+      if (!res.error && res.data) data = res.data;
+    } catch (err) {
+      console.warn('[appointments] Supabase public book failed, using db.json:', err.message || err);
+    }
+  }
+
+  if (!data) {
+    const db = readDB();
+    db.appointments = db.appointments || [];
+    db.appointments.unshift(row);
+    writeDB(db);
+    data = row;
   }
 
   // ─── Send confirmation email with appointment number ──────
@@ -341,58 +368,102 @@ const bookPublicAppointment = async (req, res) => {
   return res.status(201).json({ message: 'Appointment booked successfully', appointment: data });
 };
 
+const isNetErr = (err) =>
+  /fetch failed|timeout|ENOTFOUND|ECONNREFUSED|UND_ERR/i.test(String(err && (err.message || err.details || err)));
+
+const filterLocalAppointments = (dbAppointments, req) => {
+  let list = dbAppointments || [];
+  if (req.user?.role === 'admin') {
+    list = list.filter((a) => String(a.hospitalId) === String(req.user.hospitalId));
+  } else if (req.user?.role !== 'superadmin') {
+    list = list.filter((a) => String(a.userId) === String(req.user?.id));
+  }
+  const { from, to, search, status, page, limit } = req.query || {};
+  if (from && to) {
+    list = list.filter((a) => a.date >= from && a.date <= to);
+  }
+  if (status && status !== 'all') {
+    list = list.filter((a) => a.status === status);
+  }
+  if (search && search.trim()) {
+    const term = search.trim().toLowerCase();
+    list = list.filter((a) =>
+      (a.patientName || '').toLowerCase().includes(term) ||
+      (a.petName || '').toLowerCase().includes(term) ||
+      (a.email || '').toLowerCase().includes(term) ||
+      (a.patientPhone || '').toLowerCase().includes(term) ||
+      (a.hospital || '').toLowerCase().includes(term)
+    );
+  }
+  list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  if (page) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 10;
+    const fromIndex = (pageNum - 1) * limitNum;
+    const paginated = list.slice(fromIndex, fromIndex + limitNum);
+    return { appointments: paginated, total: list.length, page: pageNum, limit: limitNum };
+  }
+  return list;
+};
+
 // ─── GET /api/appointments ────────────────────────────────────
 const getAppointments = async (req, res) => {
   try {
     const { from, to, page, limit, search, status } = req.query || {};
 
-    let q = supabase.from(T).select('*', { count: 'exact' });
+    if (supabase) {
+      try {
+        let q = supabase.from(T).select('*', { count: 'exact' });
 
-    if (req.user.role === 'admin') {
-      q = q.eq('hospitalId', req.user.hospitalId);
-    } else if (req.user.role !== 'superadmin') {
-      q = q.eq('userId', req.user.id);
+        if (req.user.role === 'admin') {
+          q = q.eq('hospitalId', req.user.hospitalId);
+        } else if (req.user.role !== 'superadmin') {
+          q = q.eq('userId', req.user.id);
+        }
+
+        if (from && to) {
+          q = q.gte('date', from).lte('date', to);
+        }
+
+        if (status && status !== 'all') {
+          q = q.eq('status', status);
+        }
+
+        if (search && search.trim()) {
+          const term = search.trim();
+          q = q.or(`patientName.ilike.%${term}%,petName.ilike.%${term}%,appointmentType.ilike.%${term}%,email.ilike.%${term}%,patientPhone.ilike.%${term}%,hospital.ilike.%${term}%`);
+        }
+
+        q = q.order('createdAt', { ascending: false });
+
+        if (page) {
+          const pageNum = parseInt(page) || 1;
+          const limitNum = parseInt(limit) || 10;
+          const fromIndex = (pageNum - 1) * limitNum;
+          const toIndex = fromIndex + limitNum - 1;
+          q = q.range(fromIndex, toIndex);
+        }
+
+        const { data, error, count } = await q;
+        if (!error && Array.isArray(data)) {
+          if (page) {
+            return res.json({
+              appointments: data || [],
+              total: count || 0,
+              page: parseInt(page),
+              limit: parseInt(limit)
+            });
+          }
+          return res.json(data || []);
+        }
+      } catch (err) {
+        console.warn('[appointments] Supabase getAppointments failed, using db.json:', err.message || err);
+      }
     }
 
-    if (from && to) {
-      q = q.gte('date', from).lte('date', to);
-    }
-
-    if (status && status !== 'all') {
-      q = q.eq('status', status);
-    }
-
-    if (search && search.trim()) {
-      const term = search.trim();
-      q = q.or(`patientName.ilike.%${term}%,petName.ilike.%${term}%,appointmentType.ilike.%${term}%,email.ilike.%${term}%,patientPhone.ilike.%${term}%,hospital.ilike.%${term}%`);
-    }
-
-    q = q.order('createdAt', { ascending: false });
-
-    if (page) {
-      const pageNum = parseInt(page) || 1;
-      const limitNum = parseInt(limit) || 10;
-      const fromIndex = (pageNum - 1) * limitNum;
-      const toIndex = fromIndex + limitNum - 1;
-      q = q.range(fromIndex, toIndex);
-    }
-
-    const { data, error, count } = await q;
-    if (error) {
-      console.error('[appointments] list error:', error);
-      return res.status(500).json({ message: 'Could not load appointments' });
-    }
-
-    if (page) {
-      return res.json({
-        appointments: data || [],
-        total: count || 0,
-        page: parseInt(page),
-        limit: parseInt(limit)
-      });
-    }
-
-    return res.json(data || []);
+    const db = readDB();
+    const result = filterLocalAppointments(db.appointments || [], req);
+    return res.json(result);
   } catch (err) {
     console.error('[appointments] getAppointments unexpected error:', err);
     return res.status(500).json({ message: 'Internal server error' });
@@ -462,7 +533,7 @@ const updateAppointment = async (req, res) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  const fields = ['date', 'time', 'patientName', 'patientPhone', 'reason', 'petName', 'species','sex', 'breed', 'appointmentType', 'status', 'doctorName'];
+  const fields = ['date', 'time', 'patientName', 'patientPhone', 'reason', 'petName', 'species', 'sex', 'breed', 'appointmentType', 'status', 'doctorName'];
   const patch = { updatedAt: new Date().toISOString() };
   let statusChanged = false;
   fields.forEach((f) => {

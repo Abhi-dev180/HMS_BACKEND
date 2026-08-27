@@ -4,15 +4,18 @@ const { createClient } = require('@supabase/supabase-js');
 const url = process.env.SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Retry transient network failures.
-const fetchWithRetry = async (input, init, retries = 2) => {
+// Retry transient network failures (fails fast on permanent DNS ENOTFOUND).
+const fetchWithRetry = async (input, init, retries = 1) => {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
       return await fetch(input, init);
     } catch (err) {
       lastErr = err;
-      if (attempt < retries) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      if (err?.cause?.code === 'ENOTFOUND' || err?.code === 'ENOTFOUND' || /ENOTFOUND/i.test(String(err))) {
+        throw err;
+      }
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
     }
   }
   throw lastErr;

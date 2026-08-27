@@ -1,5 +1,4 @@
-
-
+// Server entrypoint with nodemon configuration
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 require('dotenv').config();
@@ -62,8 +61,8 @@ app.use(cors({
 const { webhook: stripeWebhook } = require('./controllers/paymentController');
 app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Rate limiter middleware to prevent exceeding API usage limits
 const { apiRateLimiter } = require('./middleware/rateLimiter');
@@ -141,7 +140,7 @@ const { supabase } = require('./config/supabase');
 app.get('/api/auth/verify-renewal/:token', async (req, res) => {
   try {
     const { token } = req.params;
-    
+
     const { data: user, error } = await supabase
       .from('users')
       .select('id, email, name')
@@ -150,9 +149,9 @@ app.get('/api/auth/verify-renewal/:token', async (req, res) => {
       .single();
 
     if (error || !user) {
-      return res.status(404).json({ 
-        valid: false, 
-        message: 'Invalid or expired renewal link' 
+      return res.status(404).json({
+        valid: false,
+        message: 'Invalid or expired renewal link'
       });
     }
 
@@ -219,6 +218,14 @@ const server = app.listen(PORT, () => {
   });
 
   console.log('⏰ Daily cron job scheduled for 00:00');
+
+  // ─── Gmail Auto-Sync Polling (every 20 seconds) ────────────
+  const { syncIncomingGmailMessages } = require('./services/gmailSyncService');
+  setInterval(() => {
+    syncIncomingGmailMessages().catch((err) => console.error('[gmailSync] Poll error:', err.message));
+  }, 20000);
+  setTimeout(() => syncIncomingGmailMessages().catch(() => { }), 5000);
+  console.log('📧 Support Gmail Inbox auto-sync polling active (rajdevfree@gmail.com)');
 });
 
 // Initialize WebSockets

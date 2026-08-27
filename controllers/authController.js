@@ -1,15 +1,59 @@
 const jwt = require('jsonwebtoken');
 const Users = require('../db/users');
-const { isConfigured } = require('../config/supabase');
+const { supabase, isConfigured } = require('../config/supabase');
+const { readDB } = require('../models');
 const { sendPasswordResetOtp } = require('../services/emailService');
 
 const SECRET = process.env.JWT_SECRET || 'secret123';
 
-const publicUser = (u) => ({
-  id: u.id, name: u.name || '', email: u.email, mobile: u.mobile || '',
-  role: u.role, hospital: u.hospital || '', hospitalId: u.hospitalId || '',
-  active: u.active !== false
-});
+const getLatestSubscription = async (userId) => {
+  if (!userId) return null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (!error && data && data[0]) return data[0];
+    } catch (e) {}
+  }
+  const db = readDB();
+  return (db.subscriptions || []).find((s) => String(s.user_id) === String(userId)) || null;
+};
+
+const publicUser = (u, sub = null) => {
+  const expiryDate = sub?.expiry_date || u.plan_end || u.planEnd || u.expiry_date || null;
+  const planKey = sub?.plan_key || u.plan_key || u.planKey || null;
+
+  // Strict Expiration check: ONLY expired if expiryDate exists AND is in the past (< today)
+  let isExpired = false;
+  if (expiryDate) {
+    isExpired = new Date(expiryDate).getTime() < Date.now();
+  } else if (sub?.status === 'expired' || u.plan_status === 'expired' || u.planStatus === 'expired') {
+    isExpired = true;
+  }
+
+  const status = isExpired ? 'expired' : 'active';
+
+  return {
+    id: u.id, name: u.name || '', email: u.email, mobile: u.mobile || '',
+    role: u.role, hospital: u.hospital || '', hospitalId: u.hospitalId || '',
+    active: u.active !== false,
+    planKey,
+    planStart: sub?.start_date || u.plan_start || u.planStart || null,
+    planEnd: expiryDate,
+    planStatus: status,
+    isExpired,
+    subscription: sub ? { ...sub, status } : (expiryDate ? {
+      plan_key: planKey,
+      start_date: u.plan_start || u.planStart,
+      expiry_date: expiryDate,
+      status
+    } : null)
+  };
+};
 
 const signToken = (u) =>
   jwt.sign(
@@ -20,14 +64,12 @@ const signToken = (u) =>
 
 const login = async (req, res) => {
   try {
-    if (!isConfigured()) {
-      return res.status(503).json({
-        message: 'Database connection not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env file.'
-      });
-    }
-
     const email = (req.body.email || '').trim();
     const password = (req.body.password || '').toString().trim();
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
 
     const user = await Users.findByEmail(email);
     if (!user || (user.password || '').toString().trim() !== password) {
@@ -37,30 +79,25 @@ const login = async (req, res) => {
       return res.status(403).json({ message: 'Your account is inactive. Please contact support.' });
     }
 
+    const subscription = await getLatestSubscription(user.id);
+
     return res.json({
       message: 'Login successful',
       token: signToken(user),
-      user: publicUser(user)
+      user: publicUser(user, subscription)
     });
   } catch (error) {
     console.error('LOGIN ERROR:', error);
-    const netIssue = /fetch failed|timeout|ENOTFOUND|ECONNREFUSED|UND_ERR/i.test(String(error && error.message));
-    return res.status(netIssue ? 503 : 500).json({
-      message: netIssue
-        ? 'Could not reach the server. Please check your internet connection and try again.'
-        : 'Server error during login'
-    });
+    return res.status(500).json({ message: 'Server error during login' });
   }
 };
 
 const register = async (req, res) => {
   try {
-    if (!isConfigured()) {
-      return res.status(503).json({
-        message: 'Database connection not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env file.'
-      });
+    const { name, email, mobile, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
     }
-    const { name, email, mobile, password } = req.body;
     if (await Users.findByEmail(email)) {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
@@ -69,7 +106,7 @@ const register = async (req, res) => {
     }
     const newUser = await Users.insert({
       id: Date.now().toString(),
-      name,
+      name: name || email.split('@')[0],
       email: (email || '').trim(),
       mobile: mobile.toString().trim(),
       password: (password || '').toString().trim(),

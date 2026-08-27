@@ -69,16 +69,28 @@ const getMySubscription = async (req, res) => {
       return res.status(401).json({ message: 'User not authenticated' });
     }
 
-    const { data, error } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1);
+    let subscription = null;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('subscriptions')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (!error && data && data[0]) {
+          subscription = data[0];
+        }
+      } catch (e) {}
+    }
 
-    if (error) throw error;
+    if (!subscription) {
+      const { readDB } = require('../models');
+      const db = readDB();
+      subscription = (db.subscriptions || []).find((s) => String(s.user_id) === String(userId)) || null;
+    }
 
-    return res.json({ subscription: data?.[0] || null });
+    return res.json({ subscription });
   } catch (error) {
     console.error('[subscription] get error:', error);
     return res.status(500).json({ message: 'Could not fetch subscription' });
