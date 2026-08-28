@@ -72,8 +72,11 @@ const saveSubscription = async ({
   const start = startDate || new Date().toISOString();
   const expiry = expiryDate || computeExpiry(start, plan || { interval: "month", interval_count: 1 });
 
+  const crypto = require("crypto");
+  const supaId = crypto.randomUUID();
+
   const subRow = {
-    id: `sub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    id: supaId,
     user_id: userId || null,
     hospital_id: hospitalId || null,
     plan_key: planKey || "yearly",
@@ -90,17 +93,6 @@ const saveSubscription = async ({
     updated_at: new Date().toISOString(),
   };
 
-  // Upsert into local db.json first
-  const existingIdx = db.subscriptions.findIndex(
-    (s) => (stripeSubscriptionId && String(s.stripe_subscription_id) === String(stripeSubscriptionId)) || String(s.id) === String(subRow.id)
-  );
-  if (existingIdx !== -1) {
-    db.subscriptions[existingIdx] = { ...db.subscriptions[existingIdx], ...subRow };
-  } else {
-    db.subscriptions.unshift(subRow);
-  }
-  writeDB(db);
-
   let savedSupabaseData = null;
   if (isSupabaseConfigured()) {
     try {
@@ -110,10 +102,22 @@ const saveSubscription = async ({
         .select()
         .single();
       if (!error && data) savedSupabaseData = data;
+      else if (error) console.error("[payments] Supabase upsert error:", error.message);
     } catch (e) {
       console.error("[payments] saveSubscription Supabase error:", e.message);
     }
   }
+
+  // Upsert into local db.json
+  const existingIdx = db.subscriptions.findIndex(
+    (s) => (stripeSubscriptionId && String(s.stripe_subscription_id) === String(stripeSubscriptionId)) || String(s.id) === String(subRow.id)
+  );
+  if (existingIdx !== -1) {
+    db.subscriptions[existingIdx] = { ...db.subscriptions[existingIdx], ...subRow };
+  } else {
+    db.subscriptions.unshift(subRow);
+  }
+  writeDB(db);
 
   console.log("[payments] Subscription saved successfully:", {
     subscriptionId: subRow.id,

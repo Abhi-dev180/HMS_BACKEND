@@ -186,9 +186,35 @@ const syncIncomingGmailMessages = async () => {
           continue;
         }
 
-        // Create contact record
-        const row = {
+        const crypto = require('crypto');
+        const supaId = crypto.randomUUID();
+
+        // 1. Save in Supabase with valid UUID
+        if (supabase) {
+          try {
+            const supaRow = {
+              id: supaId,
+              name: name || 'Email Sender',
+              email: cleanEmail,
+              subject: subject,
+              phone: '',
+              message: snippet,
+              status: 'new',
+              created_at: dateRaw ? new Date(dateRaw).toISOString() : new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+            const { error: supaErr } = await supabase.from(T).insert(supaRow);
+            if (supaErr) console.error('[gmailSync] Supabase insert error:', supaErr.message);
+            else console.log('[gmailSync] ✅ Saved to Supabase:', supaId);
+          } catch (e) {
+            console.error('[gmailSync] Supabase error:', e.message);
+          }
+        }
+
+        // 2. Save in db.json
+        const localRow = {
           id: `gmail_${msgItem.id}`,
+          supa_id: supaId,
           name: name || 'Email Sender',
           email: cleanEmail,
           subject: subject,
@@ -201,16 +227,8 @@ const syncIncomingGmailMessages = async () => {
           updated_at: new Date().toISOString()
         };
 
-        // Store contact record in local db.json
-        db.contacts.unshift(row);
+        db.contacts.unshift(localRow);
         writeDB(db);
-
-        // Also sync to Supabase if available
-        if (supabase) {
-          try {
-            await supabase.from(T).insert(row);
-          } catch (e) { }
-        }
 
         const savedRow = row;
 

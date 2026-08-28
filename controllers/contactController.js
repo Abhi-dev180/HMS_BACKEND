@@ -74,8 +74,35 @@ const submitContact = async (req, res) => {
     }
   }
 
-  const row = {
+  const crypto = require('crypto');
+  const supaId = crypto.randomUUID();
+
+  const supaRow = {
+    id: supaId,
+    name: String(name).trim(),
+    email: String(email).trim().toLowerCase(),
+    subject: String(subject || '').trim() || 'General Inquiry',
+    phone: cleanedPhone,
+    message: String(message).trim(),
+    status: 'new',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  let savedRow = null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from(T).insert(supaRow).select().single();
+      if (!error && data) savedRow = data;
+      else if (error) console.error('[contacts] Supabase insert error:', error.message);
+    } catch (e) {
+      console.error('[contacts] Supabase error:', e.message);
+    }
+  }
+
+  const localRow = {
     id: Date.now().toString(),
+    supa_id: supaId,
     name: String(name).trim(),
     email: String(email).trim().toLowerCase(),
     subject: String(subject || '').trim() || 'General Inquiry',
@@ -88,20 +115,10 @@ const submitContact = async (req, res) => {
     updated_at: new Date().toISOString()
   };
 
-  let savedRow = null;
-  if (supabase) {
-    try {
-      const { data, error } = await supabase.from(T).insert(row).select().single();
-      if (!error && data) savedRow = data;
-    } catch (e) {}
-  }
-
-  if (!savedRow) {
-    const contacts = getLocalContacts();
-    contacts.unshift(row);
-    saveLocalContacts(contacts);
-    savedRow = row;
-  }
+  const contacts = getLocalContacts();
+  contacts.unshift(localRow);
+  saveLocalContacts(contacts);
+  savedRow = savedRow || localRow;
 
   // Send acknowledgement emails
   sendContactReceived({
