@@ -27,6 +27,14 @@ const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 
+// Clean duplicate slashes from incoming request URLs (e.g., //api/auth/login -> /api/auth/login)
+app.use((req, res, next) => {
+  if (req.url && req.url.includes('//')) {
+    req.url = req.url.replace(/\/{2,}/g, '/');
+  }
+  next();
+});
+
 // ─── CORS Configuration ──────────────────────────────────────
 const rawFrontendUrls = process.env.FRONTEND_URL || 'http://localhost:5173';
 const allowedOrigins = rawFrontendUrls
