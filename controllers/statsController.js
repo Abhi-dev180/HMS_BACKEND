@@ -138,6 +138,28 @@ const getOverviewStats = async (req, res) => {
     contactsTotal = allContacts.length;
     contactsNew = allContacts.filter((c) => (c.status || 'new') === 'new').length;
 
+    // Calculate merged demo bookings counts (Supabase + local db.json)
+    let mergedDemos = [];
+    if (supabase) {
+      try {
+        const { data } = await supabase.from('demo_bookings').select('*');
+        if (Array.isArray(data)) mergedDemos = data;
+      } catch (e) {}
+    }
+    const localDemos = db.demos || [];
+    const demoMap = new Map();
+    mergedDemos.forEach((d) => demoMap.set(String(d.id), d));
+    localDemos.forEach((d) => {
+      if (!demoMap.has(String(d.id))) {
+        demoMap.set(String(d.id), d);
+      }
+    });
+    const allDemos = Array.from(demoMap.values());
+    demosTotal = allDemos.length;
+    demosRequested = allDemos.filter((d) => (d.status || 'requested') === 'requested').length;
+    demosScheduled = allDemos.filter((d) => d.status === 'scheduled').length;
+    demosCompleted = allDemos.filter((d) => d.status === 'completed').length;
+
     if (feedbackTotal === null) {
       feedbackTotal = feedbacks.length;
       feedbackPending = feedbacks.filter((f) => f.status === 'Pending').length;

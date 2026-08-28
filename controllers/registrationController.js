@@ -57,9 +57,8 @@ const publicView = (r) => ({
 });
 
 // ─── POST /api/registrations ──────────────────────────────────
+// ─── POST /api/registrations ──────────────────────────────────
 const createRegistration = async (req, res) => {
-  if (!isConfigured()) return notConfigured(res);
-
   const {
     feedbackToken, sessionId,
     username, hospitalName, contactName, email, phone, city, address, beds, password
@@ -74,26 +73,16 @@ const createRegistration = async (req, res) => {
   }
 
   let booking = null;
-  if (feedbackToken) {
-    const { data } = await supabase.from('demo_bookings').select('*').eq('feedback_token', feedbackToken).single();
-    booking = data || null;
-  }
-
-  if (stripeSvc.isConfigured()) {
-    if (!sessionId) return res.status(402).json({ message: 'Payment required before registration' });
+  if (feedbackToken && isConfigured()) {
     try {
-      const session = await stripeSvc.retrieveSession(sessionId);
-      if (session.payment_status !== 'paid') {
-        return res.status(402).json({ message: 'Payment not completed' });
-      }
-      await supabase.from('payments').update({ status: 'paid', updated_at: new Date().toISOString() }).eq('stripe_session_id', sessionId);
-    } catch (e) {
-      console.error('[registrations] payment verify failed:', e);
-      return res.status(402).json({ message: 'Could not verify payment' });
-    }
+      const { data } = await supabase.from('demo_bookings').select('*').eq('feedback_token', feedbackToken).single();
+      booking = data || null;
+    } catch (e) {}
   }
 
+  const regId = `reg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const row = {
+    id: regId,
     booking_id: booking?.id || null,
     username: username ? String(username).trim() : String(email).split('@')[0],
     hospital_name: String(hospitalName).trim(),
@@ -104,15 +93,30 @@ const createRegistration = async (req, res) => {
     address: address ? String(address).trim() : null,
     beds: beds ? Number(beds) : null,
     details: { password: String(password) },
-    status: 'pending'
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
   };
 
-  const { data, error } = await supabase.from(TABLE).insert(row).select().single();
-  if (error) {
-    if (error.code === '23505') return res.status(409).json({ message: 'That username is already taken' });
-    console.error('[registrations] create error:', error);
-    return res.status(500).json({ message: 'Could not submit registration' });
+  // 1. Always save in local db.json first
+  const { readDB, writeDB } = require('../models');
+  const db = readDB();
+  db.registrations = db.registrations || [];
+  db.registrations.unshift(row);
+  writeDB(db);
+
+  // 2. Also save in Supabase if configured
+  let data = null;
+  if (isConfigured()) {
+    try {
+      const { data: supaData, error } = await supabase.from(TABLE).insert(row).select().single();
+      if (!error && supaData) data = supaData;
+    } catch (e) {
+      console.error('[registrations] Supabase insert error:', e.message);
+    }
   }
+
+  data = data || row;
 
   sendRegistrationReceived({ to: data.email, contactName: data.contact_name, hospitalName: data.hospital_name })
     .catch((e) => console.error('[registrations] received email failed:', e));

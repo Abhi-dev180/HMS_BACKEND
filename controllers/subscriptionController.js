@@ -97,6 +97,63 @@ const getMySubscription = async (req, res) => {
   }
 };
 
+// ─── Get user's full subscription history ──────────────────────
+const getMySubscriptions = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const userEmail = req.user?.email;
+    if (!userId && !userEmail) {
+      return res.status(401).json({ message: 'User not authenticated' });
+    }
+
+    let subscriptions = [];
+    if (supabase) {
+      try {
+        let q = supabase.from('subscriptions').select('*').order('created_at', { ascending: false });
+        if (userId) {
+          q = q.eq('user_id', userId);
+        } else if (userEmail) {
+          q = q.eq('email', userEmail);
+        }
+        const { data, error } = await q;
+        if (!error && Array.isArray(data)) {
+          subscriptions = data;
+        }
+      } catch (e) {}
+    }
+
+    const { readDB } = require('../models');
+    const db = readDB();
+    const localSubs = (db.subscriptions || []).filter(
+      (s) => (userId && String(s.user_id) === String(userId)) || (userEmail && String(s.email) === String(userEmail))
+    );
+
+    // Merge Supabase and local DB subscriptions without duplicates
+    const subMap = new Map();
+    subscriptions.forEach((s) => subMap.set(String(s.id || s.stripe_subscription_id), s));
+    localSubs.forEach((s) => {
+      const key = String(s.id || s.stripe_subscription_id);
+      if (!subMap.has(key)) subMap.set(key, s);
+    });
+
+    const allSubs = Array.from(subMap.values()).sort((a, b) => {
+      const da = new Date(a.start_date || a.created_at || 0).getTime();
+      const dbTime = new Date(b.start_date || b.created_at || 0).getTime();
+      return dbTime - da;
+    });
+
+    const activeSub = allSubs.find((s) => s.status === 'active') || allSubs[0] || null;
+
+    return res.json({
+      subscription: activeSub,
+      subscriptions: allSubs
+    });
+  } catch (error) {
+    console.error('[subscription] getMySubscriptions error:', error);
+    return res.status(500).json({ message: 'Could not fetch subscription history' });
+  }
+};
+
 // ─── Cancel subscription ──────────────────────────────────────
 const cancelSubscription = async (req, res) => {
   try {
@@ -160,6 +217,7 @@ const generateRenewalLink = async (userId) => {
 module.exports = {
   createSubscription,
   getMySubscription,
+  getMySubscriptions,
   cancelSubscription,
   generateRenewalLink
 };

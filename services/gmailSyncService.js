@@ -115,6 +115,42 @@ const syncIncomingGmailMessages = async () => {
         const cleanSubject = String(subject || '').trim();
         const emailSignature = `${cleanEmail}|${cleanSubject}`;
 
+        // ─── Extract and upload Gmail attachments to Cloudinary ───
+        const attachments = [];
+        const processPayloadParts = async (parts = []) => {
+          for (const part of parts) {
+            if (part.parts) {
+              await processPayloadParts(part.parts);
+            }
+            if (part.filename && part.body && part.body.attachmentId) {
+              try {
+                const attRes = await fetch(
+                  `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/attachments/${part.body.attachmentId}`,
+                  { headers: { Authorization: `Bearer ${accessToken}` } }
+                );
+                if (attRes.ok) {
+                  const attData = await attRes.json();
+                  const fileBuffer = Buffer.from(attData.data, 'base64url');
+                  const cloudinaryRes = await uploadAttachmentToCloudinary(fileBuffer, part.filename);
+                  if (cloudinaryRes?.secure_url) {
+                    attachments.push({
+                      filename: part.filename,
+                      url: cloudinaryRes.secure_url,
+                      path: cloudinaryRes.secure_url
+                    });
+                  }
+                }
+              } catch (attErr) {
+                console.error('[gmailSync] Attachment fetch error:', attErr.message);
+              }
+            }
+          }
+        };
+
+        if (msgData.payload?.parts) {
+          await processPayloadParts(msgData.payload.parts);
+        }
+
         const db = readDB();
         db.contacts = db.contacts || [];
         db.deleted_contact_ids = db.deleted_contact_ids || [];
@@ -160,7 +196,7 @@ const syncIncomingGmailMessages = async () => {
           message: snippet,
           source: 'support_email',
           status: 'new',
-          attachments: [],
+          attachments: attachments,
           created_at: dateRaw ? new Date(dateRaw).toISOString() : new Date().toISOString(),
           updated_at: new Date().toISOString()
         };

@@ -27,12 +27,15 @@ const publicUser = (u, sub = null) => {
   const expiryDate = sub?.expiry_date || u.plan_end || u.planEnd || u.expiry_date || null;
   const planKey = sub?.plan_key || u.plan_key || u.planKey || null;
 
-  // Strict Expiration check: ONLY expired if expiryDate exists AND is in the past (< today)
+  const isActiveExplicit = sub?.status === 'active' || u.subscription_status === 'active' || u.plan_status === 'active' || u.isExpired === false;
+
   let isExpired = false;
-  if (expiryDate) {
-    isExpired = new Date(expiryDate).getTime() < Date.now();
-  } else if (sub?.status === 'expired' || u.plan_status === 'expired' || u.planStatus === 'expired') {
-    isExpired = true;
+  if (!isActiveExplicit) {
+    if (expiryDate) {
+      isExpired = new Date(expiryDate).getTime() < Date.now();
+    } else if (sub?.status === 'expired' || u.plan_status === 'expired' || u.planStatus === 'expired') {
+      isExpired = true;
+    }
   }
 
   const status = isExpired ? 'expired' : 'active';
@@ -45,6 +48,7 @@ const publicUser = (u, sub = null) => {
     planStart: sub?.start_date || u.plan_start || u.planStart || null,
     planEnd: expiryDate,
     planStatus: status,
+    subscription_status: status,
     isExpired,
     subscription: sub ? { ...sub, status } : (expiryDate ? {
       plan_key: planKey,

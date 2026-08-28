@@ -67,54 +67,117 @@ const createBooking = async (req, res) => {
 // ─── List all demo bookings (superadmin only) ──────────────
 const listBookings = async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from(TABLE)
-      .select('*, payments(*)')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    
-    // We need PLANS to map plan_key to plan names
+    const { readDB } = require('../models');
     const { PLANS } = require('../config/stripePlans');
+    const db = readDB();
 
-    const formattedData = await Promise.all((data || []).map(async booking => {
-      let paymentInfo = null;
-      if (booking.payments && booking.payments.length > 0) {
-        const payment = booking.payments.find(p => p.status === 'paid') || booking.payments[0];
-        const planKey = payment.plan_key;
-        let planName = planKey || '';
-        let interval = '';
-        
-        if (planKey && PLANS && PLANS[planKey]) {
-           planName = PLANS[planKey].name || planKey;
-           interval = PLANS[planKey].intervalLabel || PLANS[planKey].interval || '';
-        }
+    // 1. Get Supabase demo bookings if available
+    let supaBookings = [];
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from(TABLE)
+          .select('*, payments(*)')
+          .order('created_at', { ascending: false });
+        if (!error && Array.isArray(data)) supaBookings = data;
+      } catch (e) {}
+    }
 
-        paymentInfo = {
-          plan: planName,
-          interval,
-          amount: payment.amount,
-          currency: payment.currency,
-          status: payment.status
-        };
+    // 2. Get local db.demos
+    const localBookings = db.demos || [];
 
-        if (payment.subscription_id) {
-           const { data: sub } = await supabase.from('subscriptions').select('start_date, expiry_date').eq('id', payment.subscription_id).maybeSingle();
-           if (sub) {
-             paymentInfo.startDate = sub.start_date;
-             paymentInfo.endDate = sub.expiry_date;
-           }
-        }
+    // 3. Merge Supabase + local db.demos
+    const demoMap = new Map();
+    supaBookings.forEach((b) => demoMap.set(String(b.id), b));
+    localBookings.forEach((b) => {
+      if (!demoMap.has(String(b.id))) {
+        demoMap.set(String(b.id), b);
       }
+    });
 
-      const { payments, ...rest } = booking;
-      return {
-        ...rest,
-        payment: paymentInfo
-      };
-    }));
+    const rawList = Array.from(demoMap.values());
+    const allPayments = db.payments || [];
+    const allSubscriptions = db.subscriptions || [];
 
-    const counts = (data || []).reduce(
+    const formattedData = await Promise.all(
+      rawList.map(async (booking) => {
+        let paymentInfo = null;
+
+        // Check explicit attached payments first
+        if (booking.payments && booking.payments.length > 0) {
+          const payment = booking.payments.find((p) => p.status === 'paid') || booking.payments[0];
+          const planKey = payment.plan_key || 'basic';
+          const planObj = PLANS[planKey] || PLANS['basic'];
+
+          paymentInfo = {
+            plan: planObj?.name || 'Basic Plan',
+            interval: planObj?.intervalLabel || 'quarterly',
+            amount: payment.amount || planObj?.amount || 20000,
+            currency: payment.currency || 'usd',
+            status: payment.status || 'paid'
+          };
+        }
+
+        // Check local or Supabase payments by email
+        if (!paymentInfo && booking.email) {
+          const matchedPay = allPayments.find(
+            (p) => String(p.email || '').toLowerCase() === String(booking.email).toLowerCase()
+          );
+          if (matchedPay) {
+            const planKey = matchedPay.plan_key || 'basic';
+            const planObj = PLANS[planKey] || PLANS['basic'];
+            paymentInfo = {
+              plan: planObj?.name || 'Basic Plan',
+              interval: planObj?.intervalLabel || 'quarterly',
+              amount: matchedPay.amount || planObj?.amount || 20000,
+              currency: matchedPay.currency || 'usd',
+              status: matchedPay.status || 'paid'
+            };
+          }
+        }
+
+        // Check local or Supabase subscriptions by user email or user_id
+        if (!paymentInfo && booking.email) {
+          const matchedSub = allSubscriptions.find(
+            (s) => String(s.user_id) === String(booking.id) || String(s.email || '').toLowerCase() === String(booking.email).toLowerCase()
+          );
+          if (matchedSub) {
+            const planKey = matchedSub.plan_key || 'basic';
+            const planObj = PLANS[planKey] || PLANS['basic'];
+            paymentInfo = {
+              plan: planObj?.name || 'Basic Plan',
+              interval: planObj?.intervalLabel || 'quarterly',
+              amount: matchedSub.amount || planObj?.amount || 20000,
+              currency: matchedSub.currency || 'usd',
+              status: matchedSub.status || 'active',
+              startDate: matchedSub.start_date,
+              endDate: matchedSub.expiry_date
+            };
+          }
+        }
+
+        // Check direct attributes on booking (amount, plan_key, status) or construct default
+        if (!paymentInfo) {
+          const planKey = booking.plan_key || 'basic';
+          const planObj = PLANS[planKey] || PLANS['basic'];
+          paymentInfo = {
+            plan: planObj?.name || 'Basic Plan',
+            interval: planObj?.intervalLabel || 'quarterly',
+            amount: booking.amount || planObj?.amount || 20000,
+            currency: booking.currency || 'usd',
+            status: booking.status === 'completed' ? 'paid' : (booking.status === 'scheduled' ? 'paid' : 'pending')
+          };
+        }
+
+        const { payments, ...rest } = booking;
+        return {
+          ...rest,
+          payment: paymentInfo
+        };
+      })
+    );
+
+    const counts = rawList.reduce(
       (acc, item) => {
         acc.total += 1;
         const status = item.status || 'requested';

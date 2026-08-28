@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { verifySession, webhook } = require('../controllers/paymentController');
+const { verifySession, verifyUpiPayment, webhook } = require('../controllers/paymentController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const stripeSvc = require('../services/stripeService');
 const { supabase } = require('../config/supabase');
@@ -17,6 +17,7 @@ router.get('/plans', (req, res) => res.json({ plans: getPublicPlans() }));
 
 // Public verify route
 router.get('/verify', verifySession);
+router.post('/verify-upi', verifyUpiPayment);
 
 // Stripe webhook – must be mounted with express.raw in app.js on this exact path
 router.post('/webhook', express.raw({ type: 'application/json' }), webhook);
