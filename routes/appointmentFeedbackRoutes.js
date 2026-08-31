@@ -14,7 +14,7 @@ router.post('/public', createPublicFeedback);
 
 
 router.get('/', authMiddleware, getFeedbacks);
-router.post('/', authMiddleware, roleMiddleware(['admin', 'superadmin']), createFeedback);
+router.post('/', authMiddleware, createFeedback);
 router.put('/:id', authMiddleware, roleMiddleware(['admin', 'superadmin']), updateFeedback);
 router.delete('/:id', authMiddleware, roleMiddleware(['superadmin']), deleteFeedback);
 module.exports = router;

@@ -1,5 +1,7 @@
 
 // controllers/appointmentController.js
+const jwt = require('jsonwebtoken');
+const Users = require('../db/users');
 const { supabase } = require('../config/supabase');
 const { readDB, writeDB } = require('../models');
 const {
@@ -170,7 +172,32 @@ const getBookedSlots = async (req, res) => {
 
   try {
     const bookedSlots = await getBookedSlotsForDate(date, hospitalId);
-    return res.json({ date, hospitalId: hospitalId || null, bookedSlots, availableSlots: ALLOWED_SLOTS });
+
+    // Calculate past slots if date is today or in past
+    const todayStr = new Date().toISOString().split('T')[0];
+    let pastSlots = [];
+    if (date < todayStr) {
+      pastSlots = [...ALLOWED_SLOTS];
+    } else if (date === todayStr) {
+      const now = new Date();
+      // At least 1 hour lead time from now
+      const minValidTime = new Date(now.getTime() + 60 * 60 * 1000);
+      const minHour = minValidTime.getHours();
+      const minMinute = minValidTime.getMinutes();
+      const minTimeStr = `${String(minHour).padStart(2, '0')}:${String(minMinute).padStart(2, '0')}`;
+
+      pastSlots = ALLOWED_SLOTS.filter((slot) => slot < minTimeStr);
+    }
+
+    const allUnavailable = Array.from(new Set([...(bookedSlots || []), ...pastSlots]));
+    const freeSlots = ALLOWED_SLOTS.filter((slot) => !allUnavailable.includes(slot));
+
+    return res.json({
+      date,
+      hospitalId: hospitalId || null,
+      bookedSlots: allUnavailable,
+      availableSlots: freeSlots
+    });
   } catch (err) {
     console.error('[appointments] booked-slots error:', err);
     return res.status(500).json({ message: 'Could not fetch booked slots' });
@@ -183,6 +210,12 @@ const bookAppointment = async (req, res) => {
   const hospitalId = req.body.hospitalId || (req.user.role === 'admin' ? req.user.hospitalId : undefined);
   if (!hospitalId || !patientName || !patientPhone || !date || !time) {
     return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
+  }
+
+  // Validate appointment is not in past
+  const appointmentDateTime = new Date(`${date}T${time}:00`);
+  if (appointmentDateTime.getTime() < Date.now()) {
+    return res.status(400).json({ message: 'Cannot book an appointment for a past date or time.' });
   }
 
   // 🛡️ Business hours validation
@@ -272,6 +305,12 @@ const bookPublicAppointment = async (req, res) => {
     return res.status(400).json({ message: 'Mobile number must be exactly 10 digits' });
   }
 
+  // Validate appointment is not in past
+  const appointmentDateTime = new Date(`${date}T${time}:00`);
+  if (appointmentDateTime.getTime() < Date.now()) {
+    return res.status(400).json({ message: 'Cannot book an appointment for a past date or time.' });
+  }
+
   // 🛡️ Business hours validation
   if (!ALLOWED_SLOTS.includes(time)) {
     return res.status(400).json({ message: 'Selected time is outside business hours.' });
@@ -289,11 +328,27 @@ const bookPublicAppointment = async (req, res) => {
     console.error('[appointments] public slot check failed:', err);
   }
 
+  let resolvedUserId = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret123');
+      if (decoded && decoded.id) resolvedUserId = String(decoded.id);
+    } catch (e) {}
+  }
+  if (!resolvedUserId && email) {
+    try {
+      const existingUser = await Users.findByEmail(email);
+      if (existingUser && existingUser.id) resolvedUserId = String(existingUser.id);
+    } catch (e) {}
+  }
+
   const appointmentNumber = await generateAppointmentNumber();
 
   const row = {
     id: Date.now().toString(),
-    userId: null,
+    userId: resolvedUserId,
     hospitalId: String(hospitalId),
     hospital: name,
     patientName: String(patientName).trim(),
@@ -308,7 +363,7 @@ const bookPublicAppointment = async (req, res) => {
     breed: breed || '',
     appointmentType: 'Consult',
     status: 'Pending',
-    source: 'public',
+    source: resolvedUserId ? 'dashboard' : 'public',
     appointment_number: appointmentNumber
   };
 

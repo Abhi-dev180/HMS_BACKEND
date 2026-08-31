@@ -133,7 +133,9 @@ const createOneTimeCheckout = async ({
       payment_type: 'one-time'
     },
     success_url: `${baseUrl}/register${tokenPath}?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${baseUrl}/pricing${tokenPath}?payment=cancelled`
+    cancel_url: feedbackToken 
+      ? `${baseUrl}/pricing?token=${encodeURIComponent(feedbackToken)}&payment=cancelled`
+      : `${baseUrl}/pricing?payment=cancelled`
   });
 
   return session;

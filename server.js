@@ -127,7 +127,7 @@ const {
 
 const appointmentFeedbackRouter = express.Router();
 appointmentFeedbackRouter.get('/', authMiddleware, getFeedbacks);
-appointmentFeedbackRouter.post('/', authMiddleware, roleMiddleware(['admin', 'superadmin']), createFeedback);
+appointmentFeedbackRouter.post('/', authMiddleware, createFeedback);
 appointmentFeedbackRouter.put('/:id', authMiddleware, roleMiddleware(['admin', 'superadmin']), updateFeedback);
 appointmentFeedbackRouter.delete('/:id', authMiddleware, roleMiddleware(['superadmin']), deleteFeedback);
 

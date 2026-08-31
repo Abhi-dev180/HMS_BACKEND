@@ -103,7 +103,7 @@ const listBookings = async (req, res) => {
       rawList.map(async (booking) => {
         let paymentInfo = null;
 
-        // Check explicit attached payments first
+        // Check explicit attached payments (linked by booking_id)
         if (booking.payments && booking.payments.length > 0) {
           const payment = booking.payments.find((p) => p.status === 'paid') || booking.payments[0];
           const planKey = payment.plan_key || 'basic';
@@ -112,60 +112,19 @@ const listBookings = async (req, res) => {
           paymentInfo = {
             plan: planObj?.name || 'Basic Plan',
             interval: planObj?.intervalLabel || 'quarterly',
-            amount: payment.amount || planObj?.amount || 20000,
+            amount: payment.amount || planObj?.amount || 0,
             currency: payment.currency || 'usd',
-            status: payment.status || 'paid'
+            status: payment.status === 'paid' ? 'paid' : 'pending'
           };
-        }
-
-        // Check local or Supabase payments by email
-        if (!paymentInfo && booking.email) {
-          const matchedPay = allPayments.find(
-            (p) => String(p.email || '').toLowerCase() === String(booking.email).toLowerCase()
-          );
-          if (matchedPay) {
-            const planKey = matchedPay.plan_key || 'basic';
-            const planObj = PLANS[planKey] || PLANS['basic'];
-            paymentInfo = {
-              plan: planObj?.name || 'Basic Plan',
-              interval: planObj?.intervalLabel || 'quarterly',
-              amount: matchedPay.amount || planObj?.amount || 20000,
-              currency: matchedPay.currency || 'usd',
-              status: matchedPay.status || 'paid'
-            };
-          }
-        }
-
-        // Check local or Supabase subscriptions by user email or user_id
-        if (!paymentInfo && booking.email) {
-          const matchedSub = allSubscriptions.find(
-            (s) => String(s.user_id) === String(booking.id) || String(s.email || '').toLowerCase() === String(booking.email).toLowerCase()
-          );
-          if (matchedSub) {
-            const planKey = matchedSub.plan_key || 'basic';
-            const planObj = PLANS[planKey] || PLANS['basic'];
-            paymentInfo = {
-              plan: planObj?.name || 'Basic Plan',
-              interval: planObj?.intervalLabel || 'quarterly',
-              amount: matchedSub.amount || planObj?.amount || 20000,
-              currency: matchedSub.currency || 'usd',
-              status: matchedSub.status || 'active',
-              startDate: matchedSub.start_date,
-              endDate: matchedSub.expiry_date
-            };
-          }
-        }
-
-        // Check direct attributes on booking (amount, plan_key, status) or construct default
-        if (!paymentInfo) {
+        } else if (booking.stripe_invoice_id) {
           const planKey = booking.plan_key || 'basic';
           const planObj = PLANS[planKey] || PLANS['basic'];
           paymentInfo = {
             plan: planObj?.name || 'Basic Plan',
             interval: planObj?.intervalLabel || 'quarterly',
-            amount: booking.amount || planObj?.amount || 20000,
+            amount: booking.amount || planObj?.amount || 0,
             currency: booking.currency || 'usd',
-            status: booking.status === 'completed' ? 'paid' : (booking.status === 'scheduled' ? 'paid' : 'pending')
+            status: 'paid'
           };
         }
 

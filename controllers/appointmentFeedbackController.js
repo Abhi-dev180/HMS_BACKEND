@@ -17,7 +17,7 @@ const tableMissing = (res) => {
   });
 };
 
-// ─── GET all (admin sees own hospital, superadmin sees all) ───
+// ─── GET all (admin sees own hospital, superadmin sees all, user sees own) ───
 const getFeedbacks = async (req, res) => {
   try {
     let query = supabase.from(TABLE).select('*').order('created_at', { ascending: false });
@@ -31,24 +31,26 @@ const getFeedbacks = async (req, res) => {
       return res.status(500).json({ message: 'Could not load feedbacks' });
     }
 
-    // 🔍 Fetch appointment details (number, email, phone) for each feedback
+    // 🔍 Fetch appointment details (number, email, phone, userId) for each feedback
     const feedbacksWithAppointment = await Promise.all(data.map(async (item) => {
       let appointmentDetails = {
         appointmentNumber: null,
         email: null,
-        patientPhone: null
+        patientPhone: null,
+        userId: null
       };
       if (item.appointment_id) {
         const { data: appt } = await supabase
           .from('appointments')
-          .select('appointment_number, email, patientPhone')
+          .select('appointment_number, email, patientPhone, userId')
           .eq('id', item.appointment_id)
           .maybeSingle();
         if (appt) {
           appointmentDetails = {
             appointmentNumber: appt.appointment_number || null,
             email: appt.email || null,
-            patientPhone: appt.patientPhone || null
+            patientPhone: appt.patientPhone || null,
+            userId: appt.userId || null
           };
         }
       }
@@ -56,12 +58,13 @@ const getFeedbacks = async (req, res) => {
     }));
 
     // Remap database columns for frontend
-    const mappedData = feedbacksWithAppointment.map((item) => ({
+    let mappedData = feedbacksWithAppointment.map((item) => ({
       id: item.id,
       appointmentId: item.appointment_id || null,
       appointmentNumber: item.appointmentNumber || null,
       email: item.email || null,
       patientPhone: item.patientPhone || null,
+      userId: item.userId || null,
       patientName: item.patientname || item.patientName || '',
       petName: item.petname || item.petName || '',
       appointmentType: item.appointmenttype || item.appointmentType || 'Consult',
@@ -79,6 +82,21 @@ const getFeedbacks = async (req, res) => {
       updated_at: item.updated_at
     }));
 
+    // If regular user, filter only their own feedbacks
+    if (req.user.role === 'user') {
+      const userEmail = (req.user.email || '').toLowerCase();
+      const userPhone = req.user.mobile || req.user.phone || '';
+      const userId = String(req.user.id);
+
+      mappedData = mappedData.filter((f) => {
+        const matchesUser = f.userId && String(f.userId) === userId;
+        const matchesCreated = f.createdBy && String(f.createdBy) === userId;
+        const matchesEmail = f.email && f.email.toLowerCase() === userEmail;
+        const matchesPhone = userPhone && f.patientPhone && f.patientPhone.includes(userPhone);
+        return matchesUser || matchesCreated || matchesEmail || matchesPhone;
+      });
+    }
+
     return res.json(mappedData);
   } catch (err) {
     console.error('[appt feedback] unexpected error:', err);
@@ -86,30 +104,73 @@ const getFeedbacks = async (req, res) => {
   }
 };
 
-// ─── POST (admin only) ─────────────────────────────────────────
+// ─── POST (users, admins, superadmins) ─────────────────────────
 const createFeedback = async (req, res) => {
   try {
     const {
+      appointmentId, appointmentNumber, rating,
       patientName, petName, appointmentType, date, time,
-      feedbackStatus, feedbackGiven, callAttempted, callPicked, feedbackText
+      feedbackStatus, feedbackGiven, callAttempted, callPicked, feedbackText, message, hospitalId
     } = req.body;
 
-    if (!patientName || !date) {
-      return res.status(400).json({ message: 'Patient name and date are required' });
+    const reviewText = (feedbackText || message || '').trim();
+
+    // If user role is 'user', require appointment reference and check Completed status
+    let apptRecord = null;
+    if (appointmentId || appointmentNumber) {
+      let query = supabase.from('appointments').select('*');
+      if (appointmentId) query = query.eq('id', appointmentId);
+      else if (appointmentNumber) query = query.eq('appointment_number', Number(appointmentNumber));
+
+      const { data: appt } = await query.maybeSingle();
+      if (appt) {
+        apptRecord = appt;
+      }
+    }
+
+    if (req.user.role === 'user') {
+      if (!apptRecord) {
+        return res.status(400).json({ message: 'A valid appointment is required to submit feedback.' });
+      }
+      if (apptRecord.status !== 'Completed') {
+        return res.status(400).json({
+          message: 'Feedback can only be given after the appointment is marked as Completed by the hospital admin.'
+        });
+      }
+    }
+
+    const resolvedPatientName = patientName || apptRecord?.patientName || req.user.name || 'Patient';
+    const resolvedDate = date || apptRecord?.date || new Date().toISOString().split('T')[0];
+    const resolvedHospitalId = hospitalId || apptRecord?.hospitalId || req.user.hospitalId || null;
+    const resolvedApptId = apptRecord?.id || appointmentId || null;
+
+    // Check if feedback already exists for this appointment
+    if (resolvedApptId) {
+      const { data: existing } = await supabase
+        .from(TABLE)
+        .select('id')
+        .eq('appointment_id', resolvedApptId)
+        .maybeSingle();
+
+      if (existing) {
+        return res.status(409).json({ message: 'Feedback already submitted for this appointment' });
+      }
     }
 
     const row = {
-      patientname: patientName,
-      petname: petName || '',
-      appointmenttype: appointmentType || 'Consult',
-      date: date,
-      time: time || '',
-      feedbackstatus: feedbackStatus || 'Pending',
-      feedbackgiven: feedbackGiven || false,
+      patientname: resolvedPatientName,
+      petname: petName || apptRecord?.petName || '',
+      appointmenttype: appointmentType || apptRecord?.appointmentType || 'Consult',
+      date: resolvedDate,
+      time: time || apptRecord?.time || '',
+      feedbackstatus: req.user.role === 'user' ? 'Published' : (feedbackStatus || 'Pending'),
+      feedbackgiven: feedbackGiven !== undefined ? feedbackGiven : true,
       callattempted: callAttempted || false,
       callpicked: callPicked || false,
-      feedbacktext: feedbackText || '',
-      hospitalid: req.user.hospitalId || null,
+      feedbacktext: reviewText,
+      rating: rating ? Number(rating) : null,
+      hospitalid: resolvedHospitalId,
+      appointment_id: resolvedApptId,
       createdby: req.user.id,
       created_at: new Date().toISOString()
     };
@@ -127,6 +188,8 @@ const createFeedback = async (req, res) => {
 
     const responseData = {
       id: data.id,
+      appointmentId: data.appointment_id,
+      appointmentNumber: apptRecord?.appointment_number || appointmentNumber || null,
       patientName: data.patientname,
       petName: data.petname,
       appointmentType: data.appointmenttype,
@@ -137,13 +200,14 @@ const createFeedback = async (req, res) => {
       callAttempted: data.callattempted,
       callPicked: data.callpicked,
       feedbackText: data.feedbacktext,
+      rating: data.rating,
       hospitalId: data.hospitalid,
       createdBy: data.createdby,
       created_at: data.created_at
     };
 
     broadcast('feedback_created', responseData);
-    return res.status(201).json(responseData);
+    return res.status(201).json({ message: 'Feedback submitted successfully!', feedback: responseData });
   } catch (err) {
     console.error('[appt feedback] create unexpected error:', err);
     return res.status(500).json({ message: 'Server error' });

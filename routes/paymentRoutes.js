@@ -423,4 +423,150 @@ router.post('/razorpay/verify-payment', async (req, res) => {
   }
 });
 
+// ─── Cashfree Routes ───────────────────────────────────────────
+const cashfreeSvc = require('../services/cashfreeService');
+
+router.post('/cashfree/create-order', async (req, res) => {
+  try {
+    const { booking, planKey, amount } = req.body;
+    
+    if (booking?.id && isValidUUID(booking.id)) {
+      const { data: dbPayment } = await supabase
+        .from('payments')
+        .select('status')
+        .eq('booking_id', booking.id)
+        .eq('status', 'paid')
+        .maybeSingle();
+      if (dbPayment) {
+        return res.status(400).json({ message: 'Payment already completed for this booking' });
+      }
+    }
+
+    const plan = PLANS[planKey] || PLANS['basic'];
+    const finalAmount = amount || plan.amount;
+    const orderId = `ORDER_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    const order = await cashfreeSvc.createOrder(orderId, finalAmount, {
+        id: booking?.id || `CUST_${Date.now()}`,
+        name: booking?.contact_name || "Customer",
+        email: booking?.email || "customer@example.com",
+        phone: booking?.phone || "9999999999"
+    });
+    
+    if (booking?.id && isValidUUID(booking.id)) {
+      await supabase.from('payments').insert({
+        booking_id: booking.id,
+        email: booking.email || 'customer@example.com',
+        stripe_session_id: orderId,
+        plan_key: planKey || 'basic',
+        amount: finalAmount,
+        currency: 'inr',
+        status: 'pending'
+      });
+    }
+
+    res.json({ payment_session_id: order.payment_session_id, order_id: orderId });
+  } catch (error) {
+    console.error('[Cashfree] create order error:', error);
+    res.status(500).json({ message: 'Failed to create Cashfree order' });
+  }
+});
+
+router.post('/cashfree/verify-payment', async (req, res) => {
+    try {
+        const { order_id, booking, planKey } = req.body;
+        const orderData = await cashfreeSvc.getOrder(order_id);
+        
+        if (orderData.order_status !== 'PAID') {
+            return res.status(400).json({ message: 'Payment not successful yet' });
+        }
+
+        const plan = PLANS[planKey] || PLANS['basic'];
+        const transactionId = orderData.order_id;
+        
+        let updatedDemo = null;
+        let validBookingId = booking?.id && isValidUUID(booking.id) ? booking.id : null;
+
+        if (validBookingId) {
+          const { data } = await supabase
+            .from("demo_bookings")
+            .update({
+              status: "completed",
+              stripe_invoice_id: transactionId, 
+              amount: plan.amount,
+              currency: 'inr',
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", validBookingId)
+            .select()
+            .single();
+            
+          updatedDemo = data;
+        }
+
+        const { data: updatedPay, error: updErr } = await supabase.from('payments').update({
+          status: 'paid'
+        }).eq('booking_id', validBookingId).select();
+        
+        if (!updatedPay || updatedPay.length === 0) {
+          await supabase.from('payments').insert({
+            booking_id: validBookingId,
+            email: booking?.email || 'customer@example.com',
+            stripe_session_id: transactionId,
+            plan_key: planKey || 'basic',
+            amount: plan.amount,
+            currency: 'inr',
+            status: 'paid'
+          });
+        }
+
+        const startDate = new Date().toLocaleDateString();
+        const endDate = new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString();
+
+        if(booking?.email) {
+            try {
+                const invoicePdfBuffer = await generateInvoice({
+                  hospitalName: booking?.hospital_name || 'Hospital',
+                  contactName: booking?.contact_name || 'User',
+                  phone: booking?.phone || '',
+                  email: booking?.email || 'customer@example.com',
+                  planName: plan.name,
+                  amount: plan.amount,
+                  paymentMethod: 'Cashfree',
+                  transactionId,
+                  date: new Date().toLocaleDateString(),
+                  startDate,
+                  endDate
+                });
+
+                await emailSvc.sendInvoicePaidEmail({
+                  to: booking?.email,
+                  contactName: booking?.contact_name || 'User',
+                  hospitalName: booking?.hospital_name || 'Hospital',
+                  phone: booking?.phone || '',
+                  email: booking?.email || 'customer@example.com',
+                  planName: plan.name,
+                  amount: plan.amount,
+                  paymentMethod: 'Cashfree',
+                  invoiceId: transactionId,
+                  startDate,
+                  endDate,
+                  invoicePdfBuffer
+                });
+            } catch(e) {
+                console.error("Cashfree invoice email err:", e);
+            }
+        }
+
+        if (updatedDemo) {
+          broadcast('demo_updated', updatedDemo);
+        }
+
+        res.json({ success: true, status: orderData.order_status });
+    } catch (error) {
+        console.error('[Cashfree] verify payment error:', error);
+        res.status(500).json({ message: 'Failed to verify Cashfree payment' });
+    }
+});
+
 module.exports = router;

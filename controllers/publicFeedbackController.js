@@ -14,13 +14,19 @@ const submitPublicFeedback = async (req, res) => {
   try {
     const { data: appt, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, hospitalId, patientName, petName, date, time')
+      .select('id, hospitalId, patientName, petName, date, time, status')
       .eq('appointment_number', Number(appointmentNumber))
       .maybeSingle();
 
     if (apptErr || !appt) {
       console.error('Appointment lookup error:', apptErr);
       return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    if (appt.status !== 'Completed') {
+      return res.status(400).json({
+        message: 'Feedback can only be given after the appointment is marked as Completed by the hospital admin.'
+      });
     }
 
     const { data: existing } = await supabase

@@ -35,9 +35,9 @@ const getScheduleInfo = async (req, res) => {
   const taken = await takenSlots(booking.id);
   const takenMs = new Set(taken.map(t => new Date(t).getTime()));
 
-  // ✅ Get current time to filter out past slots
+  // ✅ Get current time to filter out past slots (at least 1 hour lead time)
   const now = new Date();
-  const nowMs = now.getTime();
+  const nowMs = now.getTime() + 60 * 60 * 1000;
 
   if (calcom.isConfigured()) {
     try {
