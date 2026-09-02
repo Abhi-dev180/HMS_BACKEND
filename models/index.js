@@ -11,7 +11,8 @@ const getDefaultDB = () => ({
   feedbacks: [],
   calls: [],
   transcriptions: [],
-  subscriptions: []
+  subscriptions: [],
+  services: []
 });
 
 const readDB = () => {
@@ -31,7 +32,8 @@ const readDB = () => {
       feedbacks: parsed.feedbacks || [],
       calls: parsed.calls || [],
       transcriptions: parsed.transcriptions || [],
-      subscriptions: parsed.subscriptions || []
+      subscriptions: parsed.subscriptions || [],
+      services: parsed.services || []
     };
   } catch (error) {
     console.error('Error reading db:', error);

@@ -23,6 +23,7 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const statsRoutes = require('./routes/statsRoutes');
 const calendarRoutes = require('./routes/calendarRoutes');
 const userRoutes = require('./routes/userRoutes');
+const serviceRoutes = require('./routes/serviceRoutes');
 
 
 const app = express();
@@ -111,6 +112,7 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/services', serviceRoutes);
 
 const { submitPublicFeedback } = require('./controllers/publicFeedbackController');
 app.post('/api/public-feedback', submitPublicFeedback);

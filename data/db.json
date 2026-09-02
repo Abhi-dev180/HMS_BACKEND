@@ -4,6 +4,104 @@
   "appointments": [],
   "contacts": [
     {
+      "id": "gmail_1a0614d28f979300",
+      "supa_id": "a6e96ddd-8940-4465-a5fe-d827e72e2548",
+      "name": "Lucid",
+      "email": "email@e.lucid.co",
+      "subject": "[Onboarding] Customize with Lucidchart templates",
+      "phone": "",
+      "message": "There are hundreds of them ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-02T08:47:21.000Z",
+      "updated_at": "2026-09-02T08:47:35.631Z"
+    },
+    {
+      "id": "gmail_1a05e5078c9bbff9",
+      "supa_id": "3596a339-2ba1-444c-962b-55459e4d2295",
+      "name": "Supabase",
+      "email": "noreply@supabase.com",
+      "subject": "Action required: security vulnerabilities detected in your projects",
+      "phone": "",
+      "message": "Security issues require your attention ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌​‍‎‏﻿ ‌",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-01T18:52:06.000Z",
+      "updated_at": "2026-09-02T08:44:47.544Z"
+    },
+    {
+      "id": "gmail_1a05eb6756fd3d79",
+      "supa_id": "86f42862-40bb-46d2-946c-01e079708d88",
+      "name": "ant.wilson",
+      "email": "ant.wilson@supabase.com",
+      "subject": "Your Supabase Project Rajdev34's Project has been paused.",
+      "phone": "",
+      "message": "Hi there, To optimize cloud resources, we automatically pause free-tier projects after 7 days of inactivity. Your project Rajdev34&#39;s Project (ID: fvpjqwihkzxudcfsiqvp) from your organization",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-01T20:43:30.000Z",
+      "updated_at": "2026-09-02T08:44:46.240Z"
+    },
+    {
+      "id": "gmail_1a060dbcb80dac43",
+      "supa_id": "e267bd53-5715-4eb0-84ba-381275066fff",
+      "name": "Google",
+      "email": "noreply-accounts@google.com",
+      "subject": "You shared some Google Account data with Brevo",
+      "phone": "",
+      "message": "Keep track of your Google Account data rajdevfree@gmail.com You&#39;re receiving this email because you used Sign in with Google to sign in to Brevo on 2 September at 12:13. This email summarises the",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-02T06:43:31.000Z",
+      "updated_at": "2026-09-02T08:44:45.592Z"
+    },
+    {
+      "id": "gmail_1a060ddfc60f5f8e",
+      "supa_id": "4935be15-be40-43d8-847b-93458b821cc6",
+      "name": "Maelys @ Brevo",
+      "email": "welcome@t.brevo.com",
+      "subject": "Welcome to Brevo!",
+      "phone": "",
+      "message": "Here&#39;s what to do next, and resources to guide you.‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-02T06:45:55.000Z",
+      "updated_at": "2026-09-02T08:44:44.567Z"
+    },
+    {
+      "id": "gmail_1a060e2ce141ee4b",
+      "supa_id": "45d78a72-033a-4802-842e-62cc8a926248",
+      "name": "Brevo",
+      "email": "welcome@t.brevo.com",
+      "subject": "Step 1: Reach your contacts' inbox 📩",
+      "phone": "",
+      "message": "Avoid spam filters. Land where it counts.‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌ ‌",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-02T06:51:10.000Z",
+      "updated_at": "2026-09-02T08:44:43.441Z"
+    },
+    {
+      "id": "gmail_1a060fd4df218bf0",
+      "supa_id": "755e68cc-1932-42db-be9a-1e5ef11e2bb9",
+      "name": "Pinterest",
+      "email": "recommendations@discover.pinterest.com",
+      "subject": "You do you",
+      "phone": "",
+      "message": "Top 21 Excel Formulas friday the 13th jacob anderson HR Analytics Dashboard Top 21 Excel Formulas Top 21 Excel Formulas jacob anderson jacob anderson friday the 13th friday the 13th HR Analytics",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-02T07:20:08.000Z",
+      "updated_at": "2026-09-02T08:44:42.303Z"
+    },
+    {
       "id": "gmail_1a0573b7e7aa4cb6",
       "supa_id": "13884073-2a3a-4799-955c-fbac2bb5c1a0",
       "name": "LinkedIn",
@@ -448,5 +546,263 @@
       "updated_at": "2026-08-28T02:12:18.384Z"
     }
   ],
-  "deleted_contact_ids": []
+  "services": [
+    {
+      "id": "srv_cbc_01",
+      "name": "Complete Blood Count (CBC) Panel",
+      "category": "Blood Test",
+      "description": "Measures red blood cells, white blood cells, and platelets. Essential for diagnosing anemia, infection, inflammation, and immune disorders in pets.",
+      "price": 850,
+      "currency": "INR",
+      "duration": "20 mins",
+      "turnaroundTime": "Same Day (2-4 Hours)",
+      "sampleType": "Blood Sample",
+      "fastingRequired": false,
+      "fastingDetails": "No fasting required, normal hydration recommended.",
+      "targetSpecies": [
+        "Dog",
+        "Cat",
+        "Bird",
+        "Rabbit",
+        "Horse",
+        "All Animals"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1579154204601-01588f351e67?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    },
+    {
+      "id": "srv_urine_01",
+      "name": "Comprehensive Urinalysis & Sedimentation",
+      "category": "Urine Test",
+      "description": "Evaluates chemical properties, crystals, bacteria, and protein levels in pet urine. Helps detect urinary tract infections (UTI), kidney disease, and diabetes.",
+      "price": 650,
+      "currency": "INR",
+      "duration": "15 mins",
+      "turnaroundTime": "Same Day (2 Hours)",
+      "sampleType": "Urine Sample",
+      "fastingRequired": false,
+      "fastingDetails": "Fresh morning urine sample preferred or collected at clinic.",
+      "targetSpecies": [
+        "Dog",
+        "Cat",
+        "Rabbit",
+        "All Animals"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1582719508461-905c673771fd?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    },
+    {
+      "id": "srv_kft_01",
+      "name": "Renal & Kidney Function Blood Profile",
+      "category": "Blood Test",
+      "description": "Measures Blood Urea Nitrogen (BUN), Creatinine, Phosphorus, and SDMA to evaluate kidney filtration and detect early renal insufficiency.",
+      "price": 1200,
+      "currency": "INR",
+      "duration": "20 mins",
+      "turnaroundTime": "Same Day (4 Hours)",
+      "sampleType": "Blood Sample",
+      "fastingRequired": true,
+      "fastingDetails": "8-12 hours fasting required before sample collection. Water is allowed.",
+      "targetSpecies": [
+        "Dog",
+        "Cat",
+        "All Animals"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1576086213369-97a306d36557?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    },
+    {
+      "id": "srv_lft_01",
+      "name": "Liver Function & Hepatic Enzyme Test",
+      "category": "Blood Test",
+      "description": "Checks ALT, AST, Alkaline Phosphatase (ALP), Total Bilirubin, and Albumin to assess liver health, bile duct status, and toxicity.",
+      "price": 1350,
+      "currency": "INR",
+      "duration": "20 mins",
+      "turnaroundTime": "Same Day (4-6 Hours)",
+      "sampleType": "Blood Sample",
+      "fastingRequired": true,
+      "fastingDetails": "8-10 hours fasting required. Ensure fresh drinking water is provided.",
+      "targetSpecies": [
+        "Dog",
+        "Cat",
+        "Horse",
+        "All Animals"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1581595220892-b0739db3ba8c?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    },
+    {
+      "id": "srv_xray_01",
+      "name": "High-Resolution Digital X-Ray (2 Views)",
+      "category": "Diagnostic Imaging",
+      "description": "Orthopedic and thoracic digital radiography for diagnosing bone fractures, lung infections, arthritis, swallowed foreign bodies, and cardiac enlargement.",
+      "price": 1600,
+      "currency": "INR",
+      "duration": "30 mins",
+      "turnaroundTime": "Instant (1 Hour)",
+      "sampleType": "X-Ray / Scan",
+      "fastingRequired": false,
+      "fastingDetails": "No fasting needed unless mild sedation is anticipated.",
+      "targetSpecies": [
+        "Dog",
+        "Cat",
+        "Bird",
+        "Rabbit",
+        "Horse",
+        "All Animals"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1516549655169-df83a0774514?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    },
+    {
+      "id": "srv_usg_01",
+      "name": "Abdominal & Pelvic Ultrasound Scan",
+      "category": "Diagnostic Imaging",
+      "description": "Non-invasive real-time sonography examining liver, kidneys, spleen, bladder, stomach, pancreas, and reproductive organs.",
+      "price": 2200,
+      "currency": "INR",
+      "duration": "35 mins",
+      "turnaroundTime": "Same Day (Within 2 Hours)",
+      "sampleType": "Ultrasound Scan",
+      "fastingRequired": true,
+      "fastingDetails": "10-12 hours fasting required. Avoid allowing pet to urinate 1 hour prior.",
+      "targetSpecies": [
+        "Dog",
+        "Cat",
+        "Rabbit",
+        "All Animals"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    },
+    {
+      "id": "srv_parvo_01",
+      "name": "Canine Parvovirus & Giardia Rapid Test",
+      "category": "Pathology & Biopsy",
+      "description": "Rapid immunoassay detection of Parvovirus antigen and Giardia in puppies and adult dogs showing vomiting or diarrhea.",
+      "price": 950,
+      "currency": "INR",
+      "duration": "15 mins",
+      "turnaroundTime": "Express (15-30 mins)",
+      "sampleType": "Fecal / Swab Sample",
+      "fastingRequired": false,
+      "fastingDetails": "Immediate sample testing. No preparation required.",
+      "targetSpecies": [
+        "Dog"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1576086213369-97a306d36557?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    },
+    {
+      "id": "srv_felv_01",
+      "name": "Feline Leukemia (FeLV) & FIV Combo Test",
+      "category": "Blood Test",
+      "description": "Crucial screening test for outdoor and rescue cats detecting Feline Leukemia Virus antigen and Feline Immunodeficiency Virus antibodies.",
+      "price": 1100,
+      "currency": "INR",
+      "duration": "15 mins",
+      "turnaroundTime": "Express (30 mins)",
+      "sampleType": "Blood Sample",
+      "fastingRequired": false,
+      "fastingDetails": "No fasting needed.",
+      "targetSpecies": [
+        "Cat"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1537151608828-ea2b11777ee8?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    },
+    {
+      "id": "srv_wellness_01",
+      "name": "Senior Pet Comprehensive Health & Organ Panel",
+      "category": "Preventive Health Checkup",
+      "description": "All-inclusive blood panel + Urinalysis covering CBC, Glucose, Kidney, Liver, Electrolytes, Thyroid (T4), and cardiac risk assessment.",
+      "price": 2800,
+      "currency": "INR",
+      "duration": "40 mins",
+      "turnaroundTime": "Same Day (6 Hours)",
+      "sampleType": "Blood & Urine Sample",
+      "fastingRequired": true,
+      "fastingDetails": "10-12 hours overnight fasting required. Fresh water is permitted.",
+      "targetSpecies": [
+        "Dog",
+        "Cat",
+        "All Animals"
+      ],
+      "hospitalIds": [
+        "all"
+      ],
+      "hospitalNames": [
+        "All Accredited Hospitals"
+      ],
+      "isActive": true,
+      "imageUrl": "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=600&auto=format&fit=crop&q=80",
+      "createdAt": "2026-09-02T08:52:13.409Z",
+      "updatedAt": "2026-09-02T08:52:13.409Z"
+    }
+  ]
 }

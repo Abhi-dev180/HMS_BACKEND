@@ -206,7 +206,27 @@ const getBookedSlots = async (req, res) => {
 
 // ─── POST /api/appointments (authenticated) ──────────────────
 const bookAppointment = async (req, res) => {
-  const { doctorName, date, time, patientName, patientPhone, reason, petName, species, sex, breed, appointmentType } = req.body;
+  const {
+    doctorName,
+    date,
+    time,
+    patientName,
+    patientPhone,
+    reason,
+    petName,
+    species,
+    sex,
+    breed,
+    appointmentType,
+    serviceId,
+    serviceName,
+    serviceCategory,
+    servicePrice,
+    sampleType,
+    fastingRequired,
+    fastingDetails,
+    turnaroundTime
+  } = req.body;
   const hospitalId = req.body.hospitalId || (req.user.role === 'admin' ? req.user.hospitalId : undefined);
   if (!hospitalId || !patientName || !patientPhone || !date || !time) {
     return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
@@ -239,17 +259,25 @@ const bookAppointment = async (req, res) => {
     userId: req.user.id,
     hospitalId,
     hospital: await hospitalName(hospitalId),
-    doctorName: doctorName || 'Any Available Doctor',
+    doctorName: doctorName || (serviceName ? `Lab: ${serviceName}` : 'Any Available Doctor'),
     date,
     time,
     patientName,
     patientPhone,
-    reason: reason || '',
+    reason: reason || (serviceName ? `Diagnostic Test: ${serviceName}` : ''),
     petName: petName || '',
     species: species || '',
     sex: sex || '',
     breed: breed || '',
-    appointmentType: appointmentType || 'Consult',
+    appointmentType: appointmentType || (serviceName ? 'Lab Test' : 'Consult'),
+    serviceId: serviceId || null,
+    serviceName: serviceName || null,
+    serviceCategory: serviceCategory || null,
+    servicePrice: servicePrice !== undefined ? Number(servicePrice) : null,
+    sampleType: sampleType || null,
+    fastingRequired: Boolean(fastingRequired),
+    fastingDetails: fastingDetails || '',
+    turnaroundTime: turnaroundTime || '',
     status: 'Pending',
     appointment_number: appointmentNumber
   };
@@ -297,7 +325,28 @@ const bookAppointment = async (req, res) => {
 
 // ─── POST /api/appointments/public (unauthenticated) ─────────
 const bookPublicAppointment = async (req, res) => {
-  const { hospitalId, patientName, patientPhone, email, date, time, description, petName, species, sex, breed } = req.body || {};
+  const {
+    hospitalId,
+    patientName,
+    patientPhone,
+    email,
+    date,
+    time,
+    description,
+    petName,
+    species,
+    sex,
+    breed,
+    appointmentType,
+    serviceId,
+    serviceName,
+    serviceCategory,
+    servicePrice,
+    sampleType,
+    fastingRequired,
+    fastingDetails,
+    turnaroundTime
+  } = req.body || {};
   if (!hospitalId || !patientName || !patientPhone || !date || !time) {
     return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
   }
@@ -356,12 +405,20 @@ const bookPublicAppointment = async (req, res) => {
     email: email ? String(email).trim() : '',
     date,
     time,
-    reason: description ? String(description).trim() : '',
+    reason: description ? String(description).trim() : (serviceName ? `Diagnostic Test: ${serviceName}` : ''),
     petName: petName || '',
     species: species || '',
     sex: sex || '',
     breed: breed || '',
-    appointmentType: 'Consult',
+    appointmentType: appointmentType || (serviceName ? 'Lab Test' : 'Consult'),
+    serviceId: serviceId || null,
+    serviceName: serviceName || null,
+    serviceCategory: serviceCategory || null,
+    servicePrice: servicePrice !== undefined ? Number(servicePrice) : null,
+    sampleType: sampleType || null,
+    fastingRequired: Boolean(fastingRequired),
+    fastingDetails: fastingDetails || '',
+    turnaroundTime: turnaroundTime || '',
     status: 'Pending',
     source: resolvedUserId ? 'dashboard' : 'public',
     appointment_number: appointmentNumber
@@ -588,7 +645,12 @@ const updateAppointment = async (req, res) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  const fields = ['date', 'time', 'patientName', 'patientPhone', 'reason', 'petName', 'species', 'sex', 'breed', 'appointmentType', 'status', 'doctorName'];
+  const fields = [
+    'date', 'time', 'patientName', 'patientPhone', 'reason', 'petName', 'species',
+    'sex', 'breed', 'appointmentType', 'status', 'doctorName',
+    'serviceId', 'serviceName', 'serviceCategory', 'servicePrice',
+    'sampleType', 'fastingRequired', 'fastingDetails', 'turnaroundTime'
+  ];
   const patch = { updatedAt: new Date().toISOString() };
   let statusChanged = false;
   fields.forEach((f) => {
