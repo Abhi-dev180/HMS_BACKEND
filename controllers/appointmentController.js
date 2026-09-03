@@ -26,17 +26,40 @@ const STATUSES = ['Pending', 'Confirmed', 'In Progress', 'Completed', 'Cancelled
 const LOCKED_STATUSES = ['Completed', 'Cancelled'];
 const ALLOWED_SLOTS = getDailyTimeSlots();
 
+// ─── Helper: format time string to HH:mm ──────────────────────
+const formatTimeString = (t) => {
+  if (!t) return '';
+  const clean = String(t).trim();
+  const m = clean.match(/^(\d{1,2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+  if (m) {
+    const [h, mm] = m[1].split(':');
+    return `${String(h).padStart(2, '0')}:${mm}`;
+  }
+  return clean;
+};
+
 // ─── Helper: generate unique 4‑digit appointment number ──────
 const generateAppointmentNumber = async () => {
   let number, exists;
   do {
     number = Math.floor(1000 + Math.random() * 9000);
-    const { data } = await supabase
-      .from(T)
-      .select('id')
-      .eq('appointment_number', number)
-      .limit(1);
-    exists = data && data.length > 0;
+    exists = false;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from(T)
+          .select('id')
+          .eq('appointment_number', number)
+          .limit(1);
+        if (!error && data && data.length > 0) exists = true;
+      } catch (e) {
+        exists = false;
+      }
+    }
+    if (!exists) {
+      const db = readDB();
+      exists = (db.appointments || []).some(a => Number(a.appointment_number) === number);
+    }
   } while (exists);
   return number;
 };
@@ -225,27 +248,33 @@ const bookAppointment = async (req, res) => {
     sampleType,
     fastingRequired,
     fastingDetails,
-    turnaroundTime
+    turnaroundTime,
+    paymentStatus,
+    paymentId,
+    paymentAmount,
+    paymentMethod
   } = req.body;
   const hospitalId = req.body.hospitalId || (req.user.role === 'admin' ? req.user.hospitalId : undefined);
   if (!hospitalId || !patientName || !patientPhone || !date || !time) {
     return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
   }
 
+  const cleanTime = formatTimeString(time);
+
   // Validate appointment is not in past
-  const appointmentDateTime = new Date(`${date}T${time}:00`);
+  const appointmentDateTime = new Date(`${date}T${cleanTime}:00`);
   if (appointmentDateTime.getTime() < Date.now()) {
     return res.status(400).json({ message: 'Cannot book an appointment for a past date or time.' });
   }
 
   // 🛡️ Business hours validation
-  if (!ALLOWED_SLOTS.includes(time)) {
+  if (!ALLOWED_SLOTS.includes(cleanTime)) {
     return res.status(400).json({ message: 'Selected time is outside business hours.' });
   }
 
   try {
     const booked = await getBookedSlotsForDate(date, hospitalId);
-    if (Array.isArray(booked) && booked.includes(time)) {
+    if (Array.isArray(booked) && booked.includes(cleanTime)) {
       return res.status(409).json({ message: 'That slot is already booked. Please choose another time.' });
     }
   } catch (err) {
@@ -261,9 +290,10 @@ const bookAppointment = async (req, res) => {
     hospital: await hospitalName(hospitalId),
     doctorName: doctorName || (serviceName ? `Lab: ${serviceName}` : 'Any Available Doctor'),
     date,
-    time,
+    time: cleanTime,
     patientName,
     patientPhone,
+    email: req.body.email || req.user?.email || '',
     reason: reason || (serviceName ? `Diagnostic Test: ${serviceName}` : ''),
     petName: petName || '',
     species: species || '',
@@ -279,13 +309,30 @@ const bookAppointment = async (req, res) => {
     fastingDetails: fastingDetails || '',
     turnaroundTime: turnaroundTime || '',
     status: 'Pending',
+    paymentStatus: paymentStatus || 'Paid',
+    paymentId: paymentId || `TRX_${Date.now()}`,
+    paymentAmount: paymentAmount !== undefined ? Number(paymentAmount) : (servicePrice ? Number(servicePrice) : 500),
+    paymentMethod: paymentMethod || 'Free UPI QR',
     appointment_number: appointmentNumber
   };
 
-  const { data, error } = await supabase.from(T).insert(row).select().single();
-  if (error) {
-    console.error('[appointments] book:', error);
-    return res.status(500).json({ message: 'Could not book appointment' });
+  let data = null;
+  if (supabase) {
+    try {
+      const resIns = await supabase.from(T).insert(row).select().single();
+      if (!resIns.error && resIns.data) data = resIns.data;
+      else if (resIns.error) console.warn('[appointments] Supabase book insert warning:', resIns.error);
+    } catch (err) {
+      console.warn('[appointments] Supabase book failed, using db.json:', err.message || err);
+    }
+  }
+
+  if (!data) {
+    const db = readDB();
+    db.appointments = db.appointments || [];
+    db.appointments.unshift(row);
+    writeDB(db);
+    data = row;
   }
 
   // ─── Send confirmation email with appointment number ──────
@@ -318,7 +365,7 @@ const bookAppointment = async (req, res) => {
     appointmentNumber: data.appointment_number
   }).catch((e) => console.error('[appointments] superadmin new-booking email failed:', e));
 
-  await syncGoogleCalendar('create', data);
+  syncGoogleCalendar('create', data).catch((e) => console.error('[appointments] google calendar create failed:', e));
   broadcast('appointment_created', data);
   return res.status(201).json({ message: 'Appointment booked successfully', appointment: data });
 };
@@ -345,7 +392,11 @@ const bookPublicAppointment = async (req, res) => {
     sampleType,
     fastingRequired,
     fastingDetails,
-    turnaroundTime
+    turnaroundTime,
+    paymentStatus,
+    paymentId,
+    paymentAmount,
+    paymentMethod
   } = req.body || {};
   if (!hospitalId || !patientName || !patientPhone || !date || !time) {
     return res.status(400).json({ message: 'Hospital, patient name, mobile number, date and time are required' });
@@ -354,14 +405,16 @@ const bookPublicAppointment = async (req, res) => {
     return res.status(400).json({ message: 'Mobile number must be exactly 10 digits' });
   }
 
+  const cleanTime = formatTimeString(time);
+
   // Validate appointment is not in past
-  const appointmentDateTime = new Date(`${date}T${time}:00`);
+  const appointmentDateTime = new Date(`${date}T${cleanTime}:00`);
   if (appointmentDateTime.getTime() < Date.now()) {
     return res.status(400).json({ message: 'Cannot book an appointment for a past date or time.' });
   }
 
   // 🛡️ Business hours validation
-  if (!ALLOWED_SLOTS.includes(time)) {
+  if (!ALLOWED_SLOTS.includes(cleanTime)) {
     return res.status(400).json({ message: 'Selected time is outside business hours.' });
   }
 
@@ -370,7 +423,7 @@ const bookPublicAppointment = async (req, res) => {
 
   try {
     const booked = await getBookedSlotsForDate(date, String(hospitalId));
-    if (Array.isArray(booked) && booked.includes(time)) {
+    if (Array.isArray(booked) && booked.includes(cleanTime)) {
       return res.status(409).json({ message: 'That slot is already booked. Please choose another time.' });
     }
   } catch (err) {
@@ -384,13 +437,13 @@ const bookPublicAppointment = async (req, res) => {
       const token = authHeader.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret123');
       if (decoded && decoded.id) resolvedUserId = String(decoded.id);
-    } catch (e) {}
+    } catch (e) { }
   }
   if (!resolvedUserId && email) {
     try {
       const existingUser = await Users.findByEmail(email);
       if (existingUser && existingUser.id) resolvedUserId = String(existingUser.id);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const appointmentNumber = await generateAppointmentNumber();
@@ -404,7 +457,7 @@ const bookPublicAppointment = async (req, res) => {
     patientPhone: String(patientPhone).trim(),
     email: email ? String(email).trim() : '',
     date,
-    time,
+    time: cleanTime,
     reason: description ? String(description).trim() : (serviceName ? `Diagnostic Test: ${serviceName}` : ''),
     petName: petName || '',
     species: species || '',
@@ -421,6 +474,10 @@ const bookPublicAppointment = async (req, res) => {
     turnaroundTime: turnaroundTime || '',
     status: 'Pending',
     source: resolvedUserId ? 'dashboard' : 'public',
+    paymentStatus: paymentStatus || 'Paid',
+    paymentId: paymentId || `TRX_${Date.now()}`,
+    paymentAmount: paymentAmount !== undefined ? Number(paymentAmount) : (servicePrice ? Number(servicePrice) : 500),
+    paymentMethod: paymentMethod || 'Free UPI QR',
     appointment_number: appointmentNumber
   };
 
@@ -488,7 +545,16 @@ const filterLocalAppointments = (dbAppointments, req) => {
   if (req.user?.role === 'admin') {
     list = list.filter((a) => String(a.hospitalId) === String(req.user.hospitalId));
   } else if (req.user?.role !== 'superadmin') {
-    list = list.filter((a) => String(a.userId) === String(req.user?.id));
+    const uid = String(req.user?.id || '');
+    const uemail = String(req.user?.email || '').trim().toLowerCase();
+    const uphone = String(req.user?.mobile || req.user?.phone || '').replace(/\D/g, '');
+
+    list = list.filter((a) => {
+      const matchId = Boolean(uid && String(a.userId) === uid);
+      const matchEmail = Boolean(uemail && a.email && String(a.email).trim().toLowerCase() === uemail);
+      const matchPhone = Boolean(uphone && a.patientPhone && String(a.patientPhone).replace(/\D/g, '') === uphone);
+      return matchId || matchEmail || matchPhone;
+    });
   }
   const { from, to, search, status, page, limit } = req.query || {};
   if (from && to) {
@@ -504,10 +570,15 @@ const filterLocalAppointments = (dbAppointments, req) => {
       (a.petName || '').toLowerCase().includes(term) ||
       (a.email || '').toLowerCase().includes(term) ||
       (a.patientPhone || '').toLowerCase().includes(term) ||
-      (a.hospital || '').toLowerCase().includes(term)
+      (a.hospital || '').toLowerCase().includes(term) ||
+      (a.appointment_number ? String(a.appointment_number).includes(term) : false)
     );
   }
-  list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  list.sort((a, b) => {
+    const timeA = Number(a.createdAt || a.id || 0);
+    const timeB = Number(b.createdAt || b.id || 0);
+    return timeB - timeA;
+  });
   if (page) {
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 10;
@@ -521,60 +592,34 @@ const filterLocalAppointments = (dbAppointments, req) => {
 // ─── GET /api/appointments ────────────────────────────────────
 const getAppointments = async (req, res) => {
   try {
-    const { from, to, page, limit, search, status } = req.query || {};
+    let allAppointments = [];
 
+    // 1. Fetch from Supabase if available
     if (supabase) {
       try {
-        let q = supabase.from(T).select('*', { count: 'exact' });
-
-        if (req.user.role === 'admin') {
-          q = q.eq('hospitalId', req.user.hospitalId);
-        } else if (req.user.role !== 'superadmin') {
-          q = q.eq('userId', req.user.id);
-        }
-
-        if (from && to) {
-          q = q.gte('date', from).lte('date', to);
-        }
-
-        if (status && status !== 'all') {
-          q = q.eq('status', status);
-        }
-
-        if (search && search.trim()) {
-          const term = search.trim();
-          q = q.or(`patientName.ilike.%${term}%,petName.ilike.%${term}%,appointmentType.ilike.%${term}%,email.ilike.%${term}%,patientPhone.ilike.%${term}%,hospital.ilike.%${term}%`);
-        }
-
-        q = q.order('createdAt', { ascending: false });
-
-        if (page) {
-          const pageNum = parseInt(page) || 1;
-          const limitNum = parseInt(limit) || 10;
-          const fromIndex = (pageNum - 1) * limitNum;
-          const toIndex = fromIndex + limitNum - 1;
-          q = q.range(fromIndex, toIndex);
-        }
-
-        const { data, error, count } = await q;
+        const { data, error } = await supabase.from(T).select('*').order('createdAt', { ascending: false });
         if (!error && Array.isArray(data)) {
-          if (page) {
-            return res.json({
-              appointments: data || [],
-              total: count || 0,
-              page: parseInt(page),
-              limit: parseInt(limit)
-            });
-          }
-          return res.json(data || []);
+          allAppointments = [...data];
         }
       } catch (err) {
-        console.warn('[appointments] Supabase getAppointments failed, using db.json:', err.message || err);
+        console.warn('[appointments] Supabase getAppointments query warning:', err.message || err);
       }
     }
 
+    // 2. Combine with local db.json appointments (deduplicating by id)
     const db = readDB();
-    const result = filterLocalAppointments(db.appointments || [], req);
+    const localList = db.appointments || [];
+    const idSet = new Set(allAppointments.map((a) => String(a.id)));
+
+    localList.forEach((la) => {
+      if (la && la.id && !idSet.has(String(la.id))) {
+        allAppointments.push(la);
+        idSet.add(String(la.id));
+      }
+    });
+
+    // 3. Apply role filtering, search, status, and pagination
+    const result = filterLocalAppointments(allAppointments, req);
     return res.json(result);
   } catch (err) {
     console.error('[appointments] getAppointments unexpected error:', err);

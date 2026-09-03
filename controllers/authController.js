@@ -61,7 +61,7 @@ const publicUser = (u, sub = null) => {
 
 const signToken = (u) =>
   jwt.sign(
-    { id: u.id, role: u.role, name: u.name, mobile: u.mobile, hospitalId: u.hospitalId },
+    { id: u.id, role: u.role, name: u.name, email: u.email, mobile: u.mobile || u.phone, hospitalId: u.hospitalId },
     SECRET,
     { expiresIn: '2h' }
   );

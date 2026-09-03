@@ -117,6 +117,26 @@ router.post('/create-checkout-session', async (req, res) => {
   }
 });
 
+// ─── Create appointment checkout session (Stripe one-time test/consult fee) ───
+router.post('/create-appointment-checkout', async (req, res) => {
+  try {
+    const { bookingDetails } = req.body || {};
+    if (!bookingDetails) {
+      return res.status(400).json({ message: 'bookingDetails is required' });
+    }
+
+    if (!stripeSvc.isConfigured()) {
+      return res.status(533).json({ message: 'Stripe not configured' });
+    }
+
+    const session = await stripeSvc.createAppointmentCheckoutSession({ bookingDetails });
+    return res.json({ id: session.id, url: session.url });
+  } catch (error) {
+    console.error('[payments] appointment checkout error:', error);
+    return res.status(500).json({ message: error.message || 'Failed to create appointment checkout session' });
+  }
+});
+
 // ─── PayPal Routes ─────────────────────────────────────────────
 const paypalSvc = require('../services/paypalService');
 const razorpaySvc = require('../services/razorpayService');

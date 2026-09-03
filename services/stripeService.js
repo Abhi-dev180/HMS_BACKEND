@@ -194,15 +194,58 @@ const getSubscription = async (subscriptionId) => {
   return await stripe.subscriptions.retrieve(subscriptionId);
 };
 
+// ─── Create one-time appointment checkout session ──────────────
+const createAppointmentCheckoutSession = async ({ bookingDetails }) => {
+  if (!stripe) throw new Error('Stripe not configured');
+
+  const baseUrl = getBaseUrl();
+  const amountInr = Number(bookingDetails?.amount || 500);
+  const serviceTitle = bookingDetails?.serviceName || 'Veterinary Appointment';
+  const patientTitle = bookingDetails?.petName ? `${bookingDetails.petName} (${bookingDetails.patientName || ''})` : (bookingDetails?.patientName || 'Patient');
+
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ['card'],
+    mode: 'payment',
+    line_items: [
+      {
+        price_data: {
+          currency: 'inr',
+          product_data: {
+            name: `Appointment Fee: ${serviceTitle}`,
+            description: `Hospital: ${bookingDetails?.hospitalName || 'Pet Hospital'} | Patient: ${patientTitle} | Slot: ${bookingDetails?.date || ''} ${bookingDetails?.time || ''}`
+          },
+          unit_amount: Math.round(amountInr * 100)
+        },
+        quantity: 1
+      }
+    ],
+    metadata: {
+      type: 'appointment',
+      serviceName: serviceTitle,
+      amount: String(amountInr),
+      patientName: bookingDetails?.patientName || '',
+      hospitalName: bookingDetails?.hospitalName || '',
+      date: bookingDetails?.date || '',
+      time: bookingDetails?.time || ''
+    },
+    customer_email: bookingDetails?.email || undefined,
+    success_url: `${baseUrl}/user/my-appointments?type=appointment&payment=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${baseUrl}/user/my-appointments?type=appointment&payment=cancelled`
+  });
+
+  return session;
+};
+
 module.exports = {
   isConfigured,
   createSubscriptionCheckout,
   createOneTimeCheckout,
+  createAppointmentCheckoutSession,
   retrieveSession,
   retrieveSubscription,
-  retrieveInvoice,          // ✅ new
-  sendInvoice,              // ✅ new
-  retrievePaymentIntent,    // ✅ new
+  retrieveInvoice,
+  sendInvoice,
+  retrievePaymentIntent,
   webhookConfigured,
   constructWebhookEvent,
   cancelSubscription,

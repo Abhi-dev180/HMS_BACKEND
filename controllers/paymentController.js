@@ -417,6 +417,19 @@ const verifySession = async (req, res) => {
     const targetPlanKey = session.metadata?.plan_key || "yearly";
 
     if (paid) {
+      if (session.metadata?.type === 'appointment' || session.metadata?.serviceName || req.query.type === 'appointment') {
+        return res.json({
+          configured: true,
+          paid: true,
+          isAppointment: true,
+          type: 'appointment',
+          message: '🎉 Appointment Payment Verified! Your appointment is confirmed.',
+          amount: Number(session.metadata?.amount || (session.amount_total ? session.amount_total / 100 : 500)),
+          serviceName: session.metadata?.serviceName || 'Veterinary Appointment',
+          paymentId: session.id
+        });
+      }
+
       if (isSupabaseConfigured()) {
         try {
           await supabase

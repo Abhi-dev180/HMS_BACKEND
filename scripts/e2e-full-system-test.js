@@ -149,7 +149,7 @@ async function runFullFledgedSystemAudit() {
         patientName: 'John Audit Patient',
         patientPhone: '9876543210',
         doctorName: 'Dr Smith',
-        date: '2026-09-10',
+        date: `2026-10-${Math.floor(10 + Math.random() * 15)}`,
         time: '10:00',
         reason: 'Regular Checkup'
       })
