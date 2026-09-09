@@ -117,6 +117,11 @@ router.post('/create-checkout-session', async (req, res) => {
   }
 });
 
+const { generateInvoice, generateAppointmentInvoice } = require('../services/invoiceService');
+const { readDB, writeDB } = require('../models');
+const emailSvc = require('../services/emailService');
+const { broadcast } = require('../services/websocketService');
+
 // ─── Create appointment checkout session (Stripe one-time test/consult fee) ───
 router.post('/create-appointment-checkout', async (req, res) => {
   try {
@@ -129,20 +134,245 @@ router.post('/create-appointment-checkout', async (req, res) => {
       return res.status(533).json({ message: 'Stripe not configured' });
     }
 
-    const session = await stripeSvc.createAppointmentCheckoutSession({ bookingDetails });
-    return res.json({ id: session.id, url: session.url });
+    const isLab = bookingDetails.appointmentType === 'Lab Test' || Boolean(bookingDetails.serviceName);
+    const amountInr = Number(bookingDetails.amount || bookingDetails.servicePrice || 500);
+    const apptNumber = Math.floor(1000 + Math.random() * 9000);
+    const apptId = bookingDetails.id ? String(bookingDetails.id) : Date.now().toString();
+
+    // Prepare appointment record
+    const appointmentRow = {
+      id: apptId,
+      userId: bookingDetails.userId || (req.user ? req.user.id : null),
+      hospitalId: bookingDetails.hospitalId || '',
+      hospital: bookingDetails.hospitalName || 'MEDPARK Hospital',
+      doctorName: bookingDetails.doctorName || (isLab ? `Lab: ${bookingDetails.serviceName || 'Diagnostics'}` : 'Any Available Doctor'),
+      date: bookingDetails.date || new Date().toISOString().split('T')[0],
+      time: bookingDetails.time || '10:00',
+      patientName: bookingDetails.patientName || 'Patient',
+      patientPhone: bookingDetails.patientPhone || '',
+      email: bookingDetails.email || '',
+      reason: bookingDetails.reason || (isLab ? `Diagnostic Test: ${bookingDetails.serviceName}` : 'Consultation'),
+      petName: bookingDetails.petName || '',
+      species: bookingDetails.species || '',
+      sex: bookingDetails.sex || '',
+      breed: bookingDetails.breed || '',
+      appointmentType: isLab ? 'Lab Test' : 'Consult',
+      serviceId: bookingDetails.serviceId || null,
+      serviceName: bookingDetails.serviceName || null,
+      serviceCategory: bookingDetails.serviceCategory || null,
+      servicePrice: bookingDetails.servicePrice ? Number(bookingDetails.servicePrice) : amountInr,
+      sampleType: bookingDetails.sampleType || null,
+      fastingRequired: Boolean(bookingDetails.fastingRequired),
+      fastingDetails: bookingDetails.fastingDetails || '',
+      turnaroundTime: bookingDetails.turnaroundTime || '',
+      status: 'Pending',
+      paymentStatus: 'Pending',
+      paymentId: `ST_INIT_${Date.now()}`,
+      paymentAmount: amountInr,
+      paymentMethod: 'Stripe Card',
+      appointment_number: apptNumber,
+      createdAt: new Date().toISOString()
+    };
+
+    // Save appointment record (Supabase + local db.json)
+    let saved = null;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('appointments').insert(appointmentRow).select().single();
+        if (!error && data) saved = data;
+      } catch (err) {
+        console.warn('[payments] Supabase appointment insert warning:', err.message);
+      }
+    }
+
+    if (!saved) {
+      const db = readDB();
+      db.appointments = db.appointments || [];
+      db.appointments = db.appointments.filter(a => String(a.id) !== String(apptId));
+      db.appointments.unshift(appointmentRow);
+      writeDB(db);
+      saved = appointmentRow;
+    }
+
+    // Create checkout session with Stripe
+    const session = await stripeSvc.createAppointmentCheckoutSession({
+      bookingDetails: {
+        ...bookingDetails,
+        hospitalName: appointmentRow.hospital,
+        amount: amountInr
+      },
+      appointmentId: saved.id,
+      appointmentNumber: saved.appointment_number
+    });
+
+    // Update appointment record with stripe_session_id
+    if (supabase) {
+      try {
+        await supabase.from('appointments').update({ stripe_session_id: session.id }).eq('id', saved.id);
+      } catch (_) {}
+    }
+    const db = readDB();
+    const existing = (db.appointments || []).find(a => String(a.id) === String(saved.id));
+    if (existing) {
+      existing.stripe_session_id = session.id;
+      writeDB(db);
+    }
+
+    return res.json({ id: session.id, url: session.url, appointmentId: saved.id, appointmentNumber: saved.appointment_number });
   } catch (error) {
     console.error('[payments] appointment checkout error:', error);
     return res.status(500).json({ message: error.message || 'Failed to create appointment checkout session' });
   }
 });
 
+// ─── Verify appointment checkout session (Stripe return) ───────
+router.get('/verify-appointment-session', async (req, res) => {
+  try {
+    const { session_id, appointment_id, payment } = req.query || {};
+
+    if (!session_id && !appointment_id) {
+      return res.status(400).json({ message: 'session_id or appointment_id is required' });
+    }
+
+    let session = null;
+    let isPaid = false;
+
+    if (session_id && stripeSvc.isConfigured()) {
+      try {
+        session = await stripeSvc.retrieveSession(session_id);
+        isPaid = session.payment_status === 'paid';
+      } catch (err) {
+        console.error('[payments] verify retrieveSession error:', err.message);
+      }
+    } else if (payment === 'success') {
+      isPaid = true;
+    }
+
+    // Find appointment by id or stripe_session_id or metadata
+    const targetId = appointment_id || session?.metadata?.appointmentId;
+    let appointment = null;
+
+    if (supabase) {
+      try {
+        let q = supabase.from('appointments').select('*');
+        if (targetId) q = q.eq('id', targetId);
+        else if (session_id) q = q.eq('stripe_session_id', session_id);
+        const { data } = await q.maybeSingle();
+        if (data) appointment = data;
+      } catch (e) {
+        console.warn('[payments] Supabase appointment lookup error:', e.message);
+      }
+    }
+
+    if (!appointment) {
+      const db = readDB();
+      appointment = (db.appointments || []).find(
+        (a) =>
+          (targetId && String(a.id) === String(targetId)) ||
+          (session_id && a.stripe_session_id === session_id) ||
+          (session?.metadata?.appointmentNumber && String(a.appointment_number) === String(session.metadata.appointmentNumber))
+      );
+    }
+
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    const now = new Date().toISOString();
+
+    if (isPaid) {
+      const wasAlreadyPaid = String(appointment.paymentStatus).toLowerCase() === 'paid';
+
+      appointment.paymentStatus = 'Paid';
+      appointment.paymentMethod = 'Stripe Card';
+      appointment.paymentId = session?.payment_intent || session?.id || appointment.paymentId || `ST_${Date.now()}`;
+      appointment.updatedAt = now;
+
+      // Update in Supabase
+      if (supabase) {
+        try {
+          await supabase
+            .from('appointments')
+            .update({
+              paymentStatus: 'Paid',
+              paymentMethod: appointment.paymentMethod,
+              paymentId: appointment.paymentId,
+              updatedAt: now
+            })
+            .eq('id', appointment.id);
+        } catch (_) {}
+      }
+
+      // Update in db.json
+      const db = readDB();
+      const idx = (db.appointments || []).findIndex((a) => String(a.id) === String(appointment.id));
+      if (idx !== -1) {
+        db.appointments[idx] = { ...db.appointments[idx], ...appointment };
+        writeDB(db);
+      }
+
+      // Send customized PDF invoice on mail (only once if not already sent)
+      if (!wasAlreadyPaid && appointment.email) {
+        try {
+          const pdfBuffer = await generateAppointmentInvoice(appointment);
+          await emailSvc.sendAppointmentInvoiceEmail({
+            to: appointment.email,
+            appointment,
+            invoicePdfBuffer: pdfBuffer,
+            isSuccess: true
+          });
+          console.log(`[payments] ✅ Customized PDF invoice sent to: ${appointment.email} for appointment #${appointment.appointment_number}`);
+        } catch (mailErr) {
+          console.error('[payments] Error sending appointment invoice email:', mailErr);
+        }
+      }
+
+      broadcast('appointment_updated', appointment);
+      return res.json({ success: true, paid: true, appointment });
+    } else {
+      // Payment incomplete, cancelled, or failed
+      if (String(appointment.paymentStatus).toLowerCase() === 'pending') {
+        appointment.paymentStatus = 'Failed';
+        appointment.updatedAt = now;
+
+        if (supabase) {
+          try {
+            await supabase.from('appointments').update({ paymentStatus: 'Failed', updatedAt: now }).eq('id', appointment.id);
+          } catch (_) {}
+        }
+
+        const db = readDB();
+        const idx = (db.appointments || []).findIndex((a) => String(a.id) === String(appointment.id));
+        if (idx !== -1) {
+          db.appointments[idx] = { ...db.appointments[idx], ...appointment };
+          writeDB(db);
+        }
+
+        if (appointment.email) {
+          try {
+            await emailSvc.sendAppointmentPaymentFailedEmail({
+              to: appointment.email,
+              appointment,
+              reason: 'Payment transaction was cancelled or declined by your card issuer.'
+            });
+            console.log(`[payments] ⚠️ Payment failed notification sent to: ${appointment.email}`);
+          } catch (failMailErr) {
+            console.error('[payments] Error sending payment failure email:', failMailErr);
+          }
+        }
+      }
+
+      return res.json({ success: false, paid: false, appointment, message: 'Payment incomplete or cancelled' });
+    }
+  } catch (error) {
+    console.error('[payments] verify appointment session error:', error);
+    return res.status(500).json({ message: error.message || 'Failed to verify appointment checkout session' });
+  }
+});
+
 // ─── PayPal Routes ─────────────────────────────────────────────
 const paypalSvc = require('../services/paypalService');
 const razorpaySvc = require('../services/razorpayService');
-const { generateInvoice } = require('../services/invoiceService');
-const emailSvc = require('../services/emailService');
-const { broadcast } = require('../services/websocketService');
 
 router.post('/paypal/create-order', async (req, res) => {
   try {

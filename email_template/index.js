@@ -626,47 +626,202 @@ const appointmentConfirmation = ({
   species,   
   sex,       
   breed,
+  appointmentType,
+  serviceName,
+  serviceCategory,
+  sampleType,
+  fastingRequired,
+  fastingDetails,
+  turnaroundTime,
+  paymentStatus,
+  paymentAmount,
+  paymentMethod,
   meetingLink = null
-}) => ({
-  subject: `Your appointment request has been received (#${appointmentNumber})`,
-  html: shell({
-    heading: 'Appointment request received',
-    intro: `Hi ${patientName || 'there'}, thanks for booking with ${hospitalName || 'us'}!`,
-    bodyHtml: `
-      <p style="margin:0 0 6px;color:#475569;font-size:15px;line-height:1.6;">
-        We've received your appointment request. The hospital will review and confirm it shortly.
-      </p>
-      ${detailRows([
-        ['Appointment #', appointmentNumber],
-        ['Hospital', hospitalName],
-        ['Patient', patientName],
-        ['Phone', patientPhone],
-        ['Email', email],
-        ['Pet Name', petName],
-        ['Species', species || 'Not specified'],   
-        ['Sex', sex || 'Not specified'],            
-        ['Breed', breed || 'Not specified'],        
-        ['Date', date || 'To be confirmed'],
-        ['Time', time || 'To be confirmed'],
-        ['Status', 'Pending confirmation']
-      ].filter(row => row[1]))}
-      
-      ${meetingLink ? `
-        <div style="background: #dbeafe; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid ${C.blue};">
-          <p style="margin: 0 0 5px 0;"><strong>🔗 Meeting Link:</strong></p>
-          <p style="margin: 5px 0; word-break: break-all;">
-            <a href="${meetingLink}" style="color: ${C.blue}; text-decoration: none; font-weight: 600;" target="_blank">${meetingLink}</a>
+}) => {
+  const isLab = appointmentType === 'Lab Test' || Boolean(serviceName);
+  const isPaid = String(paymentStatus || '').toLowerCase() === 'paid';
+  const feeStr = paymentAmount ? `₹${Number(paymentAmount).toFixed(2)}` : null;
+
+  return {
+    subject: isLab 
+      ? `Your Lab Test Appointment Request has been received (#${appointmentNumber})`
+      : `Your appointment request has been received (#${appointmentNumber})`,
+    html: shell({
+      heading: isLab ? 'Lab Test Appointment Received' : 'Appointment Request Received',
+      intro: `Hi ${patientName || 'there'}, thanks for booking with ${hospitalName || 'us'}!`,
+      bodyHtml: `
+        <p style="margin:0 0 10px;color:#475569;font-size:15px;line-height:1.6;">
+          ${isLab 
+            ? "We've received your diagnostic lab test booking. Please find your appointment specifications below."
+            : "We've received your appointment request. The hospital will review and confirm it shortly."}
+        </p>
+
+        ${isPaid ? `
+          <div style="background-color: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+            <p style="margin: 0; font-size: 13px; color: #15803d; font-weight: 700;">
+              ✔ Payment Completed: ${feeStr || ''} (${paymentMethod || 'Online Payment'})
+            </p>
+            <p style="margin: 4px 0 0 0; font-size: 12px; color: #166534;">
+              An official computerized PDF invoice is attached to this email.
+            </p>
+          </div>
+        ` : ''}
+
+        ${detailRows([
+          ['Appointment #', appointmentNumber],
+          ['Hospital', hospitalName],
+          [isLab ? 'Diagnostic Test' : 'Reason / Service', isLab ? (serviceName || description || 'Lab Test') : (description || 'Veterinary Consultation')],
+          isLab && serviceCategory ? ['Category', serviceCategory] : null,
+          isLab && sampleType ? ['Sample Type', sampleType] : null,
+          isLab && turnaroundTime ? ['Turnaround Time', turnaroundTime] : null,
+          isLab && fastingRequired ? ['Fasting Notice', `Required (${fastingDetails || '8-12 hrs fasting'})`] : null,
+          ['Patient', patientName],
+          ['Phone', patientPhone],
+          ['Email', email],
+          ['Pet Name', petName || 'Not specified'],
+          ['Species', species || 'Not specified'],   
+          ['Sex', sex || 'Not specified'],            
+          ['Breed', breed || 'Not specified'],        
+          ['Date', date || 'To be confirmed'],
+          ['Time', time || 'To be confirmed'],
+          ['Status', isPaid ? 'Confirmed & Paid' : 'Pending confirmation']
+        ].filter(Boolean))}
+        
+        ${meetingLink ? `
+          <div style="background: #dbeafe; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid ${C.blue};">
+            <p style="margin: 0 0 5px 0;"><strong>🔗 Meeting Link:</strong></p>
+            <p style="margin: 5px 0; word-break: break-all;">
+              <a href="${meetingLink}" style="color: ${C.blue}; text-decoration: none; font-weight: 600;" target="_blank">${meetingLink}</a>
+            </p>
+          </div>
+          ${button(meetingLink, '🔗 Join Meeting')}
+        ` : ''}
+        
+        <p style="margin:16px 0 0 0;">The hospital will contact you if anything needs changing.</p>
+      `,
+      footNote: 'You booked an appointment via the Pet Hospital Portal.',
+      showQuote: true
+    })
+  };
+};
+
+const appointmentInvoice = ({ appointment }) => {
+  const isLab = appointment.appointmentType === 'Lab Test' || Boolean(appointment.serviceName);
+  const amount = Number(appointment.paymentAmount || appointment.servicePrice || 500);
+  const feeStr = `₹${amount.toFixed(2)}`;
+  const title = isLab ? `Lab Test: ${appointment.serviceName || 'Diagnostic Investigation'}` : `Appointment #${appointment.appointment_number}`;
+
+  return {
+    subject: `🧾 Payment Invoice & Confirmation: ${title} (#${appointment.appointment_number}) - MEDPARK`,
+    html: shell({
+      heading: isLab ? 'Lab Test Payment Confirmed' : 'Appointment Payment Confirmed',
+      intro: `Hi ${appointment.patientName || 'there'}, your payment of <strong>${feeStr}</strong> has been successfully processed.`,
+      bodyHtml: `
+        <div style="background-color: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;">
+          <p style="margin: 0; font-size: 14px; color: #15803d; font-weight: 700;">
+            ✔ Payment Verified via ${appointment.paymentMethod || 'Stripe Gateway'}
+          </p>
+          <p style="margin: 4px 0 0 0; font-size: 13px; color: #166534;">
+            Transaction ID: <code>${appointment.paymentId || 'N/A'}</code> &nbsp;•&nbsp; Amount Paid: <strong>${feeStr}</strong>
           </p>
         </div>
-        ${button(meetingLink, '🔗 Join Meeting')}
-      ` : ''}
-      
-      <p style="margin:16px 0 0 0;">The hospital will contact you if anything needs changing.</p>
-    `,
-    footNote: 'You booked an appointment via the Pet Hospital Portal.',
-    showQuote: true
-  })
-});
+
+        <h3 style="color: #1e3a8a; margin-top: 18px; margin-bottom: 8px; font-size: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
+          ${isLab ? '🧪 Diagnostic Test & Specimen Details' : '🩺 Consultation Booking Details'}
+        </h3>
+        ${detailRows([
+          ['Order / Appt #', appointment.appointment_number ? `#${appointment.appointment_number}` : 'N/A'],
+          [isLab ? 'Diagnostic Test' : 'Doctor / Reason', isLab ? (appointment.serviceName || appointment.reason || 'Diagnostic Lab Test') : (appointment.doctorName ? `Dr. ${appointment.doctorName}` : (appointment.reason || 'Consultation'))],
+          isLab && appointment.serviceCategory ? ['Category', appointment.serviceCategory] : null,
+          isLab && appointment.sampleType ? ['Sample Required', appointment.sampleType] : null,
+          isLab && appointment.turnaroundTime ? ['Turnaround Time', appointment.turnaroundTime] : null,
+          isLab && appointment.fastingRequired ? ['Fasting', `Required (${appointment.fastingDetails || '8-12 hrs fasting'})`] : null,
+          ['Hospital / Clinic', appointment.hospital || 'MEDPARK Specialist Center'],
+          ['Scheduled Slot', `${appointment.date} at ${appointment.time}`],
+          ['Pet Name', appointment.petName || 'Not specified'],
+          ['Species / Breed', [appointment.species, appointment.breed, appointment.sex].filter(Boolean).join(' • ') || 'Pet Animal']
+        ].filter(Boolean))}
+
+        <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 16px; margin-top: 24px;">
+          <p style="margin: 0 0 6px 0; font-size: 14px; font-weight: 700; color: #1e40af;">
+            📎 Official PDF Invoice Attached
+          </p>
+          <p style="margin: 0; font-size: 13px; color: #1e40af; line-height: 1.5;">
+            Your computerized diagnostic tax invoice and receipt (<strong>invoice_${appointment.appointment_number || 'receipt'}.pdf</strong>) has been generated and attached directly to this email for your records.
+          </p>
+        </div>
+
+        ${button(`${FRONTEND_REDIRECT_URL}/dashboard/my-appointments`, 'View My Appointments in Portal')}
+
+        <p style="margin: 18px 0 0 0; font-size: 12px; color: #64748b;">
+          Please arrive 10-15 minutes prior to your scheduled time. Need to reschedule? You can do so directly from your user dashboard.
+        </p>
+      `,
+      footNote: 'You received this receipt because you completed a payment on the MEDPARK Pet Hospital Portal.',
+      showQuote: true
+    })
+  };
+};
+
+const appointmentPaymentFailed = ({ appointment, reason }) => {
+  const isLab = appointment.appointmentType === 'Lab Test' || Boolean(appointment.serviceName);
+  const amount = Number(appointment.paymentAmount || appointment.servicePrice || 500);
+  const feeStr = `₹${amount.toFixed(2)}`;
+  const title = isLab ? `Lab Test: ${appointment.serviceName || 'Diagnostic Investigation'}` : `Appointment #${appointment.appointment_number}`;
+
+  return {
+    subject: `⚠️ Payment Incomplete / Failed: ${title} (#${appointment.appointment_number}) - MEDPARK`,
+    html: shell({
+      heading: 'Payment Incomplete / Failed',
+      intro: `Hi ${appointment.patientName || 'there'}, your payment of <strong>${feeStr}</strong> could not be processed.`,
+      bodyHtml: `
+        <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;">
+          <p style="margin: 0; font-size: 14px; color: #b91c1c; font-weight: 700;">
+            ✖ Payment Failed or Cancelled
+          </p>
+          <p style="margin: 4px 0 0 0; font-size: 13px; color: #991b1b;">
+            Reason: ${reason || 'Card was declined or checkout session expired/cancelled.'}
+          </p>
+        </div>
+
+        <p style="font-size: 14px; color: #475569; line-height: 1.6;">
+          Your attempt to book <strong>${title}</strong> was not completed. No funds were debited from your card, or any hold will be automatically released by your bank.
+        </p>
+
+        <h3 style="color: #1e3a8a; margin-top: 18px; margin-bottom: 8px; font-size: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
+          Attempted Booking Details
+        </h3>
+        ${detailRows([
+          ['Appointment #', appointment.appointment_number ? `#${appointment.appointment_number}` : 'N/A'],
+          [isLab ? 'Diagnostic Test' : 'Doctor / Reason', isLab ? (appointment.serviceName || 'Diagnostic Lab Test') : (appointment.doctorName ? `Dr. ${appointment.doctorName}` : 'Consultation')],
+          ['Hospital / Clinic', appointment.hospital || 'MEDPARK Center'],
+          ['Slot Requested', `${appointment.date} at ${appointment.time}`],
+          ['Pet Name', appointment.petName || 'Not specified'],
+          ['Amount Due', feeStr]
+        ].filter(Boolean))}
+
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 24px;">
+          <p style="margin: 0 0 6px 0; font-size: 13px; font-weight: 700; color: #1e293b;">
+            💡 What can you do next?
+          </p>
+          <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: #475569; line-height: 1.6;">
+            <li>Try another card or retry payment with Stripe.</li>
+            <li>Use our Instant <strong>Free UPI QR Code</strong> payment option.</li>
+            <li>Pay via Net Banking or Wallets through Razorpay.</li>
+            <li>Contact our hospital helpline at <strong>+91 9814538354</strong> for assistance.</li>
+          </ul>
+        </div>
+
+        ${button(
+          isLab ? `${FRONTEND_REDIRECT_URL}/dashboard/services` : `${FRONTEND_REDIRECT_URL}/dashboard/book-appointment`,
+          'Retry Booking & Payment'
+        )}
+      `,
+      footNote: 'This notification was generated because a payment transaction was unsuccessful.',
+      showQuote: true
+    })
+  };
+};
 
 const appointmentStatusUpdate = ({ patientName, hospitalName, date, time, status, message, appointmentNumber, meetingLink = null }) => ({
   subject: `Your appointment status has been updated (#${appointmentNumber})`,
@@ -1002,5 +1157,7 @@ module.exports = {
   profileUpdated,
   otpVerification, 
   invoicePaidEmail,
-  paymentReceivedAdmin
+  paymentReceivedAdmin,
+  appointmentInvoice,
+  appointmentPaymentFailed
 };

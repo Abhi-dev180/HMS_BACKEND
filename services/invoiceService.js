@@ -235,4 +235,280 @@ const generateInvoice = (data) => {
   });
 };
 
-module.exports = { generateInvoice };
+/**
+ * Generates a customized medical/diagnostic invoice & receipt as a PDF buffer.
+ * Supports both Pet Diagnostic Lab Tests and Doctor Consultations.
+ * @param {Object} data - Appointment data
+ * @returns {Promise<Buffer>}
+ */
+const generateAppointmentInvoice = (data) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const buffers = [];
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfData = Buffer.concat(buffers);
+        resolve(pdfData);
+      });
+
+      const isLab = data.appointmentType === 'Lab Test' || Boolean(data.serviceName);
+      const isPaid = String(data.paymentStatus || '').toLowerCase() === 'paid';
+      const isFailed = String(data.paymentStatus || '').toLowerCase() === 'failed';
+
+      // Colors
+      const primaryColor = isLab ? '#0f766e' : '#1e3a8a';     // Deep Teal for Lab Test, Deep Blue for Doctor Consult
+      const lightBg = '#f8fafc';
+      const darkGray = '#475569';
+      const borderColor = '#cbd5e1';
+
+      // ─── Header Banner ──────────────────────────────────────────
+      doc.rect(0, 0, doc.page.width, 105).fill(primaryColor);
+
+      doc.fillColor('#ffffff')
+         .fontSize(22)
+         .font('Helvetica-Bold')
+         .text(isLab ? 'LABORATORY DIAGNOSTIC INVOICE' : 'APPOINTMENT INVOICE & RECEIPT', 40, 26, { align: 'left' });
+
+      doc.fillColor('#e0f2fe')
+         .fontSize(10)
+         .font('Helvetica')
+         .text(
+           isLab
+             ? 'Veterinary Pathology & Diagnostic Laboratory Investigation'
+             : 'Outpatient Clinical Consultation & Veterinary Care',
+           40,
+           52
+         );
+
+      // Provider details (Right aligned)
+      doc.fillColor('#f8fafc')
+         .fontSize(10)
+         .font('Helvetica-Bold')
+         .text(data.hospital || 'MEDPARK Hospital & Diagnostic Center', 300, 24, { align: 'right' });
+
+      doc.font('Helvetica')
+         .fontSize(9)
+         .fillColor('#cbd5e1')
+         .text('MEDPARK Health Network', 300, 39, { align: 'right' })
+         .text('24x7 Helpline: +91 9814538354 | support@medpark.com', 300, 52, { align: 'right' })
+         .text(`Hospital Center: ${data.hospital || 'Main Center'}`, 300, 65, { align: 'right' });
+
+      // ─── Top Boxes: BILLED TO (Left) & INVOICE META (Right) ─────────
+      const startY = 120;
+      const boxHeight = 105;
+
+      // Left Box: Patient & Pet Info
+      doc.rect(40, startY, 250, boxHeight)
+         .lineWidth(1)
+         .strokeColor(borderColor)
+         .fillAndStroke(lightBg, borderColor);
+
+      doc.fillColor(primaryColor)
+         .fontSize(10)
+         .font('Helvetica-Bold')
+         .text('PATIENT & PET DETAILS', 52, startY + 10);
+
+      doc.fillColor('#0f172a')
+         .fontSize(12)
+         .font('Helvetica-Bold')
+         .text(data.patientName || 'Patient', 52, startY + 26);
+
+      doc.font('Helvetica')
+         .fontSize(9)
+         .fillColor(darkGray)
+         .text(`Phone: ${data.patientPhone || 'N/A'}`, 52, startY + 44)
+         .text(`Email: ${data.email || 'N/A'}`, 52, startY + 58)
+         .text(`Pet Name: ${data.petName || 'Not specified'}`, 52, startY + 72)
+         .text(`Species / Breed: ${[data.species, data.breed, data.sex].filter(Boolean).join(' • ') || 'Pet Animal'}`, 52, startY + 86);
+
+      // Right Box: Invoice & Transaction Info
+      doc.rect(305, startY, 250, boxHeight)
+         .lineWidth(1)
+         .strokeColor(borderColor)
+         .fillAndStroke(lightBg, borderColor);
+
+      doc.fillColor(primaryColor)
+         .fontSize(10)
+         .font('Helvetica-Bold')
+         .text('PAYMENT & INVOICE DETAILS', 317, startY + 10);
+
+      const metaXLabel = 317;
+      const metaXVal = 425;
+
+      const metaRows = [
+        ['Invoice #:', `INV-${data.appointment_number || data.id || '1001'}`],
+        ['Date:', data.date || new Date().toISOString().split('T')[0]],
+        ['Payment Method:', data.paymentMethod || 'Stripe Card'],
+        ['Transaction ID:', String(data.paymentId || 'N/A').slice(0, 18)],
+        ['Payment Status:', isPaid ? 'PAID' : (isFailed ? 'FAILED' : 'PENDING')]
+      ];
+
+      metaRows.forEach(([label, val], idx) => {
+        const rowY = startY + 26 + (idx * 15);
+        doc.font('Helvetica')
+           .fontSize(9)
+           .fillColor(darkGray)
+           .text(label, metaXLabel, rowY);
+
+        doc.font('Helvetica-Bold')
+           .fontSize(9)
+           .fillColor(label === 'Payment Status:' ? (isPaid ? '#15803d' : (isFailed ? '#b91c1c' : '#b45309')) : '#0f172a')
+           .text(val, metaXVal, rowY, { width: 125, align: 'right' });
+      });
+
+      // ─── Middle Section: Clinical / Diagnostic Specifications ──────
+      const specY = startY + boxHeight + 12;
+      doc.rect(40, specY, 515, 60)
+         .fillAndStroke('#f1f5f9', '#e2e8f0');
+
+      doc.fillColor(primaryColor)
+         .fontSize(9)
+         .font('Helvetica-Bold')
+         .text(isLab ? 'DIAGNOSTIC TEST SPECIFICATIONS' : 'CONSULTATION DETAILS', 52, specY + 8);
+
+      if (isLab) {
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Test Name:', 52, specY + 23);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.serviceName || data.reason || 'Diagnostic Lab Investigation', 120, specY + 23);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Category:', 52, specY + 36);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.serviceCategory || 'Laboratory Diagnostics', 120, specY + 36);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Sample Type:', 300, specY + 23);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.sampleType || 'Standard Specimen', 380, specY + 23);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Turnaround:', 300, specY + 36);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.turnaroundTime || '24-48 Hours', 380, specY + 36);
+
+        if (data.fastingRequired) {
+          doc.font('Helvetica-Bold').fontSize(8).fillColor('#b45309')
+             .text(`* Fasting Required: ${data.fastingDetails || '8-12 hours fasting required before sample collection'}`, 52, specY + 48);
+        }
+      } else {
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Doctor / Reason:', 52, specY + 23);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.doctorName ? `Dr. ${data.doctorName}` : (data.reason || 'Veterinary Consultation'), 140, specY + 23);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Scheduled Slot:', 52, specY + 37);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(`${data.date} at ${data.time}`, 140, specY + 37);
+      }
+
+      // ─── Table Header ──────────────────────────────────────────────
+      const tableY = specY + 70;
+      doc.rect(40, tableY, 515, 24).fill(primaryColor);
+
+      doc.fillColor('#ffffff')
+         .fontSize(9)
+         .font('Helvetica-Bold')
+         .text('Description / Service Item', 52, tableY + 7, { width: 280 })
+         .text('Type', 340, tableY + 7, { width: 90 })
+         .text('Amount (INR)', 445, tableY + 7, { align: 'right', width: 100 });
+
+      // ─── Table Row ─────────────────────────────────────────────────
+      const rowY = tableY + 24;
+      doc.rect(40, rowY, 515, 34)
+         .lineWidth(1)
+         .strokeColor(borderColor)
+         .fillAndStroke('#ffffff', borderColor);
+
+      const fee = Number(data.paymentAmount || data.servicePrice || 500);
+
+      doc.fillColor('#0f172a')
+         .fontSize(9.5)
+         .font('Helvetica-Bold')
+         .text(isLab ? (data.serviceName || 'Diagnostic Lab Test') : (data.reason || 'Doctor Consultation'), 52, rowY + 7, { width: 280 });
+
+      doc.font('Helvetica')
+         .fontSize(8.5)
+         .fillColor(darkGray)
+         .text(`Slot: ${data.date} ${data.time} | Hospital: ${data.hospital || 'Center'}`, 52, rowY + 20, { width: 280 });
+
+      doc.font('Helvetica')
+         .fontSize(9)
+         .fillColor('#0f172a')
+         .text(isLab ? 'Lab Test' : 'Consultation', 340, rowY + 11, { width: 90 });
+
+      doc.font('Helvetica-Bold')
+         .fontSize(10)
+         .fillColor('#0f172a')
+         .text(`INR ${fee.toFixed(2)}`, 445, rowY + 11, { align: 'right', width: 100 });
+
+      // ─── Total Box & Status Badge ──────────────────────────────────
+      const totalY = rowY + 44;
+
+      // Status Stamp on Left
+      doc.rect(40, totalY, 200, 48)
+         .lineWidth(1.5)
+         .strokeColor(isPaid ? '#22c55e' : (isFailed ? '#ef4444' : '#f59e0b'))
+         .fillAndStroke(isPaid ? '#f0fdf4' : (isFailed ? '#fef2f2' : '#fffbeb'), isPaid ? '#86efac' : (isFailed ? '#fca5a5' : '#fde68a'));
+
+      doc.font('Helvetica-Bold')
+         .fontSize(12)
+         .fillColor(isPaid ? '#15803d' : (isFailed ? '#b91c1c' : '#b45309'))
+         .text(isPaid ? 'PAID / VERIFIED' : (isFailed ? 'PAYMENT FAILED' : 'PAYMENT PENDING'), 52, totalY + 11);
+
+      doc.font('Helvetica')
+         .fontSize(8)
+         .fillColor(darkGray)
+         .text(isPaid ? `Processed via ${data.paymentMethod || 'Stripe Gateway'}` : (isFailed ? 'Transaction incomplete or declined' : 'Awaiting payment confirmation'), 52, totalY + 28);
+
+      // Total Paid Box on Right
+      doc.rect(345, totalY, 210, 48)
+         .fill(primaryColor);
+
+      doc.fillColor('#e0f2fe')
+         .fontSize(9)
+         .font('Helvetica-Bold')
+         .text('TOTAL AMOUNT PAID', 357, totalY + 8);
+
+      doc.fillColor('#ffffff')
+         .fontSize(16)
+         .font('Helvetica-Bold')
+         .text(`INR ${fee.toFixed(2)}`, 357, totalY + 23, { align: 'right', width: 185 });
+
+      // ─── Instructions & Notes ──────────────────────────────────────
+      const notesY = totalY + 58;
+      doc.rect(40, notesY, 515, 58)
+         .fillAndStroke('#f8fafc', '#e2e8f0');
+
+      doc.fillColor(primaryColor)
+         .fontSize(8.5)
+         .font('Helvetica-Bold')
+         .text('PATIENT GUIDELINES & INSTRUCTIONS:', 52, notesY + 7);
+
+      doc.font('Helvetica')
+         .fontSize(8)
+         .fillColor(darkGray)
+         .text(
+           isLab
+             ? '1. Please arrive at the laboratory reception 10-15 minutes prior to your scheduled slot for specimen collection.\n2. Diagnostic reports will be published to your user dashboard and emailed within the stated turnaround time.\n3. Bring any previous medical or prescription history for comparative veterinary evaluation.'
+             : '1. Please arrive at the hospital 10 minutes prior to your scheduled consultation slot.\n2. Bring any previous prescription or vaccination records for your pet.\n3. In case of emergency or rescheduling, please contact our 24/7 helpline immediately.',
+           52,
+           notesY + 19,
+           { width: 495, lineGap: 2 }
+         );
+
+      // ─── Footer ────────────────────────────────────────────────────
+      doc.strokeColor('#e2e8f0')
+         .lineWidth(1)
+         .moveTo(40, doc.page.height - 45)
+         .lineTo(doc.page.width - 40, doc.page.height - 45)
+         .stroke();
+
+      doc.fillColor('#94a3b8')
+         .fontSize(8)
+         .font('Helvetica')
+         .text(
+           'This is a computer-generated invoice and receipt from MEDPARK Hospital Management System. For inquiries, email support@medpark.com.',
+           40,
+           doc.page.height - 35,
+           { align: 'center', width: doc.page.width - 80 }
+         );
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
+
+module.exports = { generateInvoice, generateAppointmentInvoice };

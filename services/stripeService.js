@@ -195,13 +195,16 @@ const getSubscription = async (subscriptionId) => {
 };
 
 // ─── Create one-time appointment checkout session ──────────────
-const createAppointmentCheckoutSession = async ({ bookingDetails }) => {
+const createAppointmentCheckoutSession = async ({ bookingDetails, appointmentId, appointmentNumber }) => {
   if (!stripe) throw new Error('Stripe not configured');
 
   const baseUrl = getBaseUrl();
-  const amountInr = Number(bookingDetails?.amount || 500);
-  const serviceTitle = bookingDetails?.serviceName || 'Veterinary Appointment';
+  const amountInr = Number(bookingDetails?.amount || bookingDetails?.servicePrice || 500);
+  const isLab = bookingDetails?.appointmentType === 'Lab Test' || Boolean(bookingDetails?.serviceName);
+  const serviceTitle = bookingDetails?.serviceName || (isLab ? 'Diagnostic Lab Test' : 'Veterinary Consultation');
   const patientTitle = bookingDetails?.petName ? `${bookingDetails.petName} (${bookingDetails.patientName || ''})` : (bookingDetails?.patientName || 'Patient');
+  const safeApptId = String(appointmentId || bookingDetails?.appointmentId || bookingDetails?.id || '');
+  const safeApptNumber = String(appointmentNumber || bookingDetails?.appointment_number || '');
 
   const session = await stripe.checkout.sessions.create({
     payment_method_types: ['card'],
@@ -211,8 +214,8 @@ const createAppointmentCheckoutSession = async ({ bookingDetails }) => {
         price_data: {
           currency: 'inr',
           product_data: {
-            name: `Appointment Fee: ${serviceTitle}`,
-            description: `Hospital: ${bookingDetails?.hospitalName || 'Pet Hospital'} | Patient: ${patientTitle} | Slot: ${bookingDetails?.date || ''} ${bookingDetails?.time || ''}`
+            name: `${isLab ? '🧪 Lab Test' : '🩺 Consultation'}: ${serviceTitle}`,
+            description: `Hospital: ${bookingDetails?.hospitalName || 'MEDPARK Hospital'} | Patient: ${patientTitle} | Slot: ${bookingDetails?.date || ''} ${bookingDetails?.time || ''}`
           },
           unit_amount: Math.round(amountInr * 100)
         },
@@ -221,16 +224,20 @@ const createAppointmentCheckoutSession = async ({ bookingDetails }) => {
     ],
     metadata: {
       type: 'appointment',
+      appointmentId: safeApptId,
+      appointmentNumber: safeApptNumber,
       serviceName: serviceTitle,
       amount: String(amountInr),
       patientName: bookingDetails?.patientName || '',
       hospitalName: bookingDetails?.hospitalName || '',
       date: bookingDetails?.date || '',
-      time: bookingDetails?.time || ''
+      time: bookingDetails?.time || '',
+      email: bookingDetails?.email || '',
+      isLab: String(isLab)
     },
     customer_email: bookingDetails?.email || undefined,
-    success_url: `${baseUrl}/user/my-appointments?type=appointment&payment=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${baseUrl}/user/my-appointments?type=appointment&payment=cancelled`
+    success_url: `${baseUrl}/dashboard/my-appointments?type=appointment&payment=success&session_id={CHECKOUT_SESSION_ID}&appointment_id=${safeApptId}`,
+    cancel_url: `${baseUrl}/dashboard/my-appointments?type=appointment&payment=cancelled&session_id={CHECKOUT_SESSION_ID}&appointment_id=${safeApptId}`
   });
 
   return session;

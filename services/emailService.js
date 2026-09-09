@@ -372,7 +372,36 @@ const sendRegistrationReceived = ({ to, ...vars }) => send({ to, ...templates.re
 const sendRegistrationApproved = ({ to, ...vars }) => send({ to, ...templates.registrationApproved(vars) });
 const sendRegistrationDenied = ({ to, ...vars }) => send({ to, ...templates.registrationDenied(vars) });
 const sendPasswordResetOtp = ({ to, ...vars }) => send({ to, ...templates.passwordResetOtp(vars) });
-const sendAppointmentConfirmation = ({ to, ...vars }) => send({ to, ...templates.appointmentConfirmation(vars) });
+const sendAppointmentConfirmation = ({ to, ...vars }) => {
+  const mailOptions = { to, ...templates.appointmentConfirmation(vars) };
+  if (vars.invoicePdfBuffer) {
+    mailOptions.attachments = [
+      {
+        filename: `invoice_${vars.appointmentNumber || 'receipt'}.pdf`,
+        content: vars.invoicePdfBuffer
+      }
+    ];
+  }
+  return send(mailOptions);
+};
+
+const sendAppointmentInvoiceEmail = ({ to, appointment, invoicePdfBuffer, isSuccess = true }) => {
+  const mailOptions = { to, ...templates.appointmentInvoice({ appointment, isSuccess }) };
+  if (invoicePdfBuffer) {
+    mailOptions.attachments = [
+      {
+        filename: `invoice_${appointment.appointment_number || appointment.id || 'receipt'}.pdf`,
+        content: invoicePdfBuffer
+      }
+    ];
+  }
+  return send(mailOptions);
+};
+
+const sendAppointmentPaymentFailedEmail = ({ to, appointment, reason }) => {
+  return send({ to, ...templates.appointmentPaymentFailed({ appointment, reason }) });
+};
+
 const sendAppointmentStatusUpdate = ({ to, ...vars }) => send({ to, ...templates.appointmentStatusUpdate(vars) });
 const sendAppointmentRescheduled = ({ to, ...vars }) => send({ to, ...templates.appointmentRescheduled(vars) });
 const sendAppointmentCancelled = ({ to, ...vars }) => send({ to, ...templates.appointmentCancelled(vars) });
@@ -689,4 +718,6 @@ module.exports = {
   sendProfileUpdatedEmail,
   sendInvoicePaidEmail,
   sendPaymentReceivedToSuperAdmin,
+  sendAppointmentInvoiceEmail,
+  sendAppointmentPaymentFailedEmail
 };

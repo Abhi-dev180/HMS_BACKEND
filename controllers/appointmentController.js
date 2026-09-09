@@ -12,6 +12,7 @@ const {
   sendAppointmentCancelled,
   sendAppointmentFeedbackInvitation
 } = require('../services/emailService');
+const { generateAppointmentInvoice } = require('../services/invoiceService');
 const {
   getBookedSlotsForDate,
   createCalendarEvent,
@@ -335,20 +336,46 @@ const bookAppointment = async (req, res) => {
     data = row;
   }
 
-  // ─── Send confirmation email with appointment number ──────
-  if (req.user?.email) {
-    sendAppointmentConfirmation({
-      to: req.user.email,
-      patientName: data.patientName,
-      patientPhone: data.patientPhone,
-      hospitalName: data.hospital,
-      date: data.date,
-      time: data.time,
-      petName: data.petName,
-      description: data.reason,
-      email: req.user.email,
-      appointmentNumber: data.appointment_number
-    }).catch((e) => console.error('[appointments] confirmation email failed:', e));
+  // ─── Send confirmation email with appointment number & invoice ──────
+  const recipientEmail = data.email || req.user?.email || req.body?.email;
+  if (recipientEmail) {
+    (async () => {
+      let invoicePdfBuffer = null;
+      if (String(data.paymentStatus).toLowerCase() === 'paid') {
+        try {
+          invoicePdfBuffer = await generateAppointmentInvoice(data);
+        } catch (pdfErr) {
+          console.error('[appointments] invoice PDF generation failed:', pdfErr);
+        }
+      }
+
+      return sendAppointmentConfirmation({
+        to: recipientEmail,
+        patientName: data.patientName,
+        patientPhone: data.patientPhone,
+        hospitalName: data.hospital,
+        date: data.date,
+        time: data.time,
+        petName: data.petName,
+        species: data.species,
+        sex: data.sex,
+        breed: data.breed,
+        appointmentType: data.appointmentType,
+        serviceName: data.serviceName,
+        serviceCategory: data.serviceCategory,
+        sampleType: data.sampleType,
+        fastingRequired: data.fastingRequired,
+        fastingDetails: data.fastingDetails,
+        turnaroundTime: data.turnaroundTime,
+        paymentStatus: data.paymentStatus,
+        paymentAmount: data.paymentAmount,
+        paymentMethod: data.paymentMethod,
+        description: data.reason,
+        email: recipientEmail,
+        appointmentNumber: data.appointment_number,
+        invoicePdfBuffer
+      });
+    })().catch((e) => console.error('[appointments] confirmation email failed:', e));
   }
 
   // ─── Send admin notification with appointment number ──────
@@ -499,23 +526,45 @@ const bookPublicAppointment = async (req, res) => {
     data = row;
   }
 
-  // ─── Send confirmation email with appointment number ──────
+  // ─── Send confirmation email with appointment number & invoice ──────
   if (data.email) {
-    sendAppointmentConfirmation({
-      to: data.email,
-      patientName: data.patientName,
-      patientPhone: data.patientPhone,
-      hospitalName: data.hospital,
-      date: data.date,
-      time: data.time,
-      petName: data.petName,
-      description: data.reason,
-      email: data.email,
-      appointmentNumber: data.appointment_number,
-      species: data.species,
-      sex: data.sex,
-      breed: data.breed
-    }).catch((e) => console.error('[appointments] confirmation email failed:', e));
+    (async () => {
+      let invoicePdfBuffer = null;
+      if (String(data.paymentStatus).toLowerCase() === 'paid') {
+        try {
+          invoicePdfBuffer = await generateAppointmentInvoice(data);
+        } catch (pdfErr) {
+          console.error('[appointments] invoice PDF generation failed:', pdfErr);
+        }
+      }
+
+      return sendAppointmentConfirmation({
+        to: data.email,
+        patientName: data.patientName,
+        patientPhone: data.patientPhone,
+        hospitalName: data.hospital,
+        date: data.date,
+        time: data.time,
+        petName: data.petName,
+        description: data.reason,
+        email: data.email,
+        appointmentNumber: data.appointment_number,
+        species: data.species,
+        sex: data.sex,
+        breed: data.breed,
+        appointmentType: data.appointmentType,
+        serviceName: data.serviceName,
+        serviceCategory: data.serviceCategory,
+        sampleType: data.sampleType,
+        fastingRequired: data.fastingRequired,
+        fastingDetails: data.fastingDetails,
+        turnaroundTime: data.turnaroundTime,
+        paymentStatus: data.paymentStatus,
+        paymentAmount: data.paymentAmount,
+        paymentMethod: data.paymentMethod,
+        invoicePdfBuffer
+      });
+    })().catch((e) => console.error('[appointments] confirmation email failed:', e));
   }
 
   // ─── Send admin notification with appointment number ──────
@@ -556,12 +605,19 @@ const filterLocalAppointments = (dbAppointments, req) => {
       return matchId || matchEmail || matchPhone;
     });
   }
-  const { from, to, search, status, page, limit } = req.query || {};
+  const { from, to, search, status, type, page, limit } = req.query || {};
   if (from && to) {
     list = list.filter((a) => a.date >= from && a.date <= to);
   }
   if (status && status !== 'all') {
     list = list.filter((a) => a.status === status);
+  }
+  if (type && type !== 'all') {
+    if (type === 'test') {
+      list = list.filter((a) => a.appointmentType === 'Lab Test' || Boolean(a.serviceName));
+    } else if (type === 'consult') {
+      list = list.filter((a) => a.appointmentType !== 'Lab Test' && !a.serviceName);
+    }
   }
   if (search && search.trim()) {
     const term = search.trim().toLowerCase();
@@ -571,6 +627,11 @@ const filterLocalAppointments = (dbAppointments, req) => {
       (a.email || '').toLowerCase().includes(term) ||
       (a.patientPhone || '').toLowerCase().includes(term) ||
       (a.hospital || '').toLowerCase().includes(term) ||
+      (a.serviceName || '').toLowerCase().includes(term) ||
+      (a.serviceCategory || '').toLowerCase().includes(term) ||
+      (a.sampleType || '').toLowerCase().includes(term) ||
+      (a.doctorName || '').toLowerCase().includes(term) ||
+      (a.appointmentType || '').toLowerCase().includes(term) ||
       (a.appointment_number ? String(a.appointment_number).includes(term) : false)
     );
   }

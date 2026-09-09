@@ -1,7 +1,9 @@
 const { supabase, isConfigured: isSupabaseConfigured } = require("../config/supabase");
 const stripeSvc = require("../services/stripeService");
 const { PLANS } = require("../config/stripePlans");
-const { sendInvoicePaidEmail, sendPaymentReceivedToSuperAdmin } = require("../services/emailService");
+const { sendInvoicePaidEmail, sendPaymentReceivedToSuperAdmin, sendAppointmentInvoiceEmail, sendAppointmentPaymentFailedEmail } = require("../services/emailService");
+const { generateAppointmentInvoice } = require("../services/invoiceService");
+const { readDB, writeDB } = require("../models");
 const { broadcast } = require('../services/websocketService');
 
 // ─── Helper: safe date conversion from Stripe timestamp ────
@@ -807,6 +809,78 @@ const webhook = async (req, res) => {
       const session = event.data.object;
       console.log("[webhook] Checkout completed:", session.id);
       console.log("👉 Session metadata:", session.metadata);
+
+      // Handle Appointment / Lab Test payment checkout
+      if (session.metadata?.type === 'appointment' || session.metadata?.appointmentId) {
+        const targetId = session.metadata?.appointmentId;
+        const apptNumber = session.metadata?.appointmentNumber;
+        let appt = null;
+
+        if (isSupabaseConfigured()) {
+          try {
+            let q = supabase.from('appointments').select('*');
+            if (targetId) q = q.eq('id', targetId);
+            else q = q.eq('stripe_session_id', session.id);
+            const { data } = await q.maybeSingle();
+            if (data) appt = data;
+          } catch (_) {}
+        }
+
+        if (!appt) {
+          const db = readDB();
+          appt = (db.appointments || []).find(
+            (a) =>
+              (targetId && String(a.id) === String(targetId)) ||
+              (apptNumber && String(a.appointment_number) === String(apptNumber)) ||
+              a.stripe_session_id === session.id
+          );
+        }
+
+        if (appt) {
+          const wasAlreadyPaid = String(appt.paymentStatus).toLowerCase() === 'paid';
+          appt.paymentStatus = 'Paid';
+          appt.paymentMethod = 'Stripe Card';
+          appt.paymentId = session.payment_intent || session.id;
+          appt.updatedAt = new Date().toISOString();
+
+          if (isSupabaseConfigured()) {
+            await supabase
+              .from('appointments')
+              .update({
+                paymentStatus: 'Paid',
+                paymentMethod: 'Stripe Card',
+                paymentId: appt.paymentId,
+                updatedAt: appt.updatedAt
+              })
+              .eq('id', appt.id);
+          }
+
+          const db = readDB();
+          const idx = (db.appointments || []).findIndex((a) => String(a.id) === String(appt.id));
+          if (idx !== -1) {
+            db.appointments[idx] = { ...db.appointments[idx], ...appt };
+            writeDB(db);
+          }
+
+          if (!wasAlreadyPaid && appt.email) {
+            try {
+              const pdfBuffer = await generateAppointmentInvoice(appt);
+              await sendAppointmentInvoiceEmail({
+                to: appt.email,
+                appointment: appt,
+                invoicePdfBuffer: pdfBuffer,
+                isSuccess: true
+              });
+              console.log(`[webhook] ✅ Sent appointment invoice to ${appt.email}`);
+            } catch (err) {
+              console.error('[webhook] Error sending appointment invoice:', err);
+            }
+          }
+
+          broadcast('appointment_updated', appt);
+        }
+        break;
+      }
 
       if (isSupabaseConfigured()) {
         // Update existing payment record if any

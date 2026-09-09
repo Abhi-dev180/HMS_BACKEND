@@ -165,6 +165,35 @@ const getOverviewStats = async (req, res) => {
       feedbackPending = feedbacks.filter((f) => f.status === 'Pending').length;
     }
 
+    // ─── Calculate Merged Appointments Breakdown (Lab Tests vs Consultations) ───
+    let mergedAppointments = [];
+    if (supabase) {
+      try {
+        const { data } = await supabase.from('appointments').select('*');
+        if (Array.isArray(data)) mergedAppointments = data;
+      } catch (e) {}
+    }
+    const localAppointments = db.appointments || [];
+    const apptMap = new Map();
+    mergedAppointments.forEach((a) => apptMap.set(String(a.id), a));
+    localAppointments.forEach((a) => {
+      if (!apptMap.has(String(a.id))) {
+        apptMap.set(String(a.id), a);
+      }
+    });
+    const allMergedAppts = Array.from(apptMap.values());
+
+    const isTestBooking = (a) => a.appointmentType === 'Lab Test' || Boolean(a.serviceName);
+    const labTestsTotal = allMergedAppts.filter(isTestBooking).length;
+    const labTestsPending = allMergedAppts.filter((a) => isTestBooking(a) && a.status === 'Pending').length;
+    const labTestsConfirmed = allMergedAppts.filter((a) => isTestBooking(a) && a.status === 'Confirmed').length;
+    const labTestsCompleted = allMergedAppts.filter((a) => isTestBooking(a) && a.status === 'Completed').length;
+
+    const consultsTotal = allMergedAppts.filter((a) => !isTestBooking(a)).length;
+    const consultsPending = allMergedAppts.filter((a) => !isTestBooking(a) && a.status === 'Pending').length;
+    const consultsConfirmed = allMergedAppts.filter((a) => !isTestBooking(a) && a.status === 'Confirmed').length;
+    const consultsCompleted = allMergedAppts.filter((a) => !isTestBooking(a) && a.status === 'Completed').length;
+
     // ─── Hospital Status Chart Breakdown ──────────────────────
     const allHospitals = db.hospitals || [];
     const hospTotal = hospitalsTotal || allHospitals.length || 0;
@@ -245,7 +274,19 @@ const getOverviewStats = async (req, res) => {
         completed: bookingsCompleted || 0,
         cancelled: bookingsCancelled || 0,
         today: bookingsToday || 0,
-        thisMonth: bookingsThisMonth || 0
+        thisMonth: bookingsThisMonth || 0,
+        labTests: {
+          total: labTestsTotal || 0,
+          pending: labTestsPending || 0,
+          confirmed: labTestsConfirmed || 0,
+          completed: labTestsCompleted || 0
+        },
+        consultations: {
+          total: consultsTotal || 0,
+          pending: consultsPending || 0,
+          confirmed: consultsConfirmed || 0,
+          completed: consultsCompleted || 0
+        }
       },
       appointments: {
         pending: bookingsPending || 0
