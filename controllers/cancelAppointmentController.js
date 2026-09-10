@@ -1,6 +1,5 @@
 const { supabase } = require('../config/supabase');
-const { sendAppointmentCancelled, sendAppointmentNewToSuperAdmin } = require('../services/emailService');
-const { deleteCalendarEvent } = require('../services/googleCalendarService');
+const { executeAppointmentCancellation } = require('./appointmentController');
 
 const T = 'appointments';
 
@@ -22,6 +21,11 @@ const publicAppointmentView = (a) => ({
   reason: a.reason || '',
   appointmentType: a.appointmentType || 'Consult',
   status: a.status,
+  cancellationReason: a.cancellationReason || '',
+  cancellationFee: a.cancellationFee || 0,
+  refundAmount: a.refundAmount || 0,
+  refundStatus: a.refundStatus || 'No Refund',
+  refundId: a.refundId || null,
   createdAt: a.createdAt || null,
   updatedAt: a.updatedAt || null,
   canModify: !['Completed', 'Cancelled'].includes(a.status)
@@ -35,19 +39,30 @@ const loadOwnedAppointment = async (id, { patientPhone, email }) => {
     return { error: { status: 400, message: 'Both mobile number and email are required.' } };
   }
 
-  const { data, error } = await supabase.from(T).select('*').eq('id', id).maybeSingle();
-  if (error) {
-    console.error('[cancelAppointment] public load error:', error);
-    return { error: { status: 500, message: 'Could not load the appointment' } };
+  let appointment = null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from(T).select('*').eq('id', id).maybeSingle();
+      if (!error && data) appointment = data;
+    } catch (e) {
+      console.error('[cancelAppointment] public load error:', e);
+    }
   }
-  if (!data) return { error: { status: 404, message: 'Appointment not found' } };
 
-  const matches = normalizePhone(data.patientPhone) === phone && normalizeEmail(data.email) === mail;
+  if (!appointment) {
+    const { readDB } = require('../models');
+    const db = readDB();
+    appointment = (db.appointments || []).find((a) => String(a.id) === String(id));
+  }
+
+  if (!appointment) return { error: { status: 404, message: 'Appointment not found' } };
+
+  const matches = normalizePhone(appointment.patientPhone) === phone && normalizeEmail(appointment.email) === mail;
   if (!matches) {
     return { error: { status: 404, message: 'Appointment not found' } };
   }
 
-  return { appointment: data };
+  return { appointment };
 };
 
 const cancelPublicAppointment = async (req, res) => {
@@ -55,7 +70,7 @@ const cancelPublicAppointment = async (req, res) => {
   const email = req.body?.email ?? req.query.email;
   const reason = req.body?.reason ?? req.query.reason;
 
-  console.log('[cancelAppointment] incoming', { id: req.params.id, patientPhone, email });
+  console.log('[cancelAppointment] incoming public cancel:', { id: req.params.id, patientPhone, email });
 
   const { appointment, error: guard } = await loadOwnedAppointment(req.params.id, { patientPhone, email });
   if (guard) return res.status(guard.status).json({ message: guard.message });
@@ -67,56 +82,23 @@ const cancelPublicAppointment = async (req, res) => {
     return res.status(409).json({ message: 'A completed appointment can no longer be cancelled.' });
   }
 
-  if (appointment.google_event_id) {
-    try {
-      await deleteCalendarEvent(appointment.google_event_id);
-      await supabase.from(T).update({ google_event_id: null }).eq('id', appointment.id);
-    } catch (e) {
-      console.error('[cancelAppointment] google delete failed:', e);
-    }
-  }
+  try {
+    const updated = await executeAppointmentCancellation({
+      appointment,
+      reason: reason ? String(reason).trim() : 'Cancelled by patient',
+      cancelledBy: 'public_patient'
+    });
 
-  const patch = {
-    status: 'Cancelled',
-    updatedAt: new Date().toISOString()
-  };
-  if (reason && String(reason).trim()) {
-    patch.reason = `${appointment.reason ? `${appointment.reason} — ` : ''}Cancelled by patient: ${String(reason).trim()}`;
-  }
+    console.log('[cancelAppointment] successfully cancelled appointment id:', updated.id, 'refund:', updated.refundAmount);
 
-  const { data, error } = await supabase.from(T).update(patch).eq('id', appointment.id).select().single();
-  if (error) {
+    return res.json({
+      message: 'Appointment cancelled and refund processed. A confirmation has been emailed to you.',
+      appointment: publicAppointmentView(updated)
+    });
+  } catch (error) {
     console.error('[cancelAppointment] cancel error:', error);
-    return res.status(500).json({ message: 'Could not cancel the appointment' });
+    return res.status(500).json({ message: error.message || 'Could not cancel the appointment' });
   }
-
-  console.log('[cancelAppointment] cancelled appointment id:', data.id, 'google_event_id:', data.google_event_id);
-
-  sendAppointmentCancelled({
-    to: data.email,
-    patientName: data.patientName,
-    hospitalName: data.hospital,
-    date: data.date,
-    time: data.time,
-    reason: reason ? String(reason).trim() : ''
-  }).catch((e) => console.error('[cancelAppointment] cancellation email failed:', e));
-
-  sendAppointmentNewToSuperAdmin({
-    patientName: data.patientName,
-    patientPhone: data.patientPhone,
-    email: data.email,
-    hospitalName: data.hospital,
-    date: data.date,
-    time: data.time,
-    petName: data.petName,
-    description: `CANCELLED by the patient. ${reason ? `Reason: ${String(reason).trim()}` : ''}`.trim(),
-    source: 'public'
-  }).catch((e) => console.error('[cancelAppointment] superadmin cancellation email failed:', e));
-
-  return res.json({
-    message: 'Appointment cancelled. A confirmation has been emailed to you.',
-    appointment: publicAppointmentView(data)
-  });
 };
 
 module.exports = { cancelPublicAppointment };

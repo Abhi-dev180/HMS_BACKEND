@@ -404,7 +404,10 @@ const sendAppointmentPaymentFailedEmail = ({ to, appointment, reason }) => {
 
 const sendAppointmentStatusUpdate = ({ to, ...vars }) => send({ to, ...templates.appointmentStatusUpdate(vars) });
 const sendAppointmentRescheduled = ({ to, ...vars }) => send({ to, ...templates.appointmentRescheduled(vars) });
-const sendAppointmentCancelled = ({ to, ...vars }) => send({ to, ...templates.appointmentCancelled(vars) });
+const sendAppointmentCancelled = ({ to, ...vars }) => {
+  const payload = vars.appointment ? { ...vars.appointment, ...vars } : vars;
+  return send({ to, ...templates.appointmentCancelled(payload) });
+};
 const sendContactReceived = ({ to, ...vars }) => send({ to, ...templates.contactReceived(vars) });
 const sendContactStatusUpdate = ({ to, ...vars }) => send({ to, ...templates.contactStatusUpdate(vars) });
 

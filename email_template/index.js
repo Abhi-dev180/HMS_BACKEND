@@ -925,25 +925,123 @@ const appointmentRescheduled = ({ patientName, hospitalName, date, time, previou
   })
 });
 
-const appointmentCancelled = ({ patientName, hospitalName, date, time, reason }) => ({
-  subject: 'Your appointment has been cancelled',
-  html: shell({
-    heading: 'Appointment cancelled',
-    intro: `Hi ${patientName || 'there'}, your appointment has been cancelled as requested.`,
-    bodyHtml: `
-      ${detailRows([
-        ['Hospital', hospitalName],
-        ['Date', date],
-        ['Time', time],
-        ['Reason', reason],
-        ['Status', 'Cancelled']
-      ])}
-      <p style="margin:16px 0 0 0;">You can book again at any time from our appointment page.</p>
-    `,
-    footNote: 'You are receiving this because you booked an appointment with us.',
-    showQuote: true
-  })
-});
+const appointmentCancelled = ({
+  patientName,
+  hospitalName,
+  date,
+  time,
+  reason,
+  appointmentNumber,
+  appointmentType,
+  serviceName,
+  serviceCategory,
+  sampleType,
+  doctorName,
+  petName,
+  species,
+  breed,
+  paymentStatus,
+  paymentAmount,
+  paymentMethod,
+  cancellationFee = 0,
+  refundAmount = 0,
+  refundId = null,
+  refundStatus = 'Refunded'
+}) => {
+  const isLab = appointmentType === 'Lab Test' || Boolean(serviceName);
+  const isPaid = String(paymentStatus || '').toLowerCase() === 'paid' || Number(refundAmount) > 0;
+  const originalPaidNum = Number(paymentAmount || 0);
+  const cancelFeeNum = Number(cancellationFee || 0);
+  const netRefundNum = Number(refundAmount || 0);
+  const serviceTitle = isLab
+    ? (serviceName || 'Diagnostic Lab Test')
+    : (doctorName ? `Consultation with Dr. ${doctorName}` : 'Veterinary Consultation');
+
+  return {
+    subject: `❌ Cancellation & Refund Confirmation: ${isLab ? 'Lab Test' : 'Appointment'} #${appointmentNumber || 'N/A'} - ${hospitalName || 'MEDPARK'}`,
+    html: shell({
+      heading: isLab ? 'Lab Test Appointment Cancelled' : 'Appointment Cancelled',
+      intro: `Hi ${patientName || 'there'}, your scheduled ${isLab ? 'diagnostic lab test' : 'appointment'} has been cancelled as requested.`,
+      bodyHtml: `
+        <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;">
+          <p style="margin: 0; font-size: 14px; color: #991b1b; font-weight: 700;">
+            🚫 Booking Cancelled Successfully
+          </p>
+          <p style="margin: 4px 0 0 0; font-size: 13px; color: #7f1d1d;">
+            ${reason ? `Reason: <em>${escapeHtml(reason)}</em>` : 'This appointment was cancelled and the slot has been released.'}
+          </p>
+        </div>
+
+        <h3 style="color: #1e3a8a; margin-top: 18px; margin-bottom: 8px; font-size: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
+          📋 Cancelled Appointment Specifications
+        </h3>
+        ${detailRows([
+          ['Appointment / Order #', appointmentNumber ? `#${appointmentNumber}` : 'N/A'],
+          [isLab ? 'Diagnostic Service' : 'Service Type', serviceTitle],
+          isLab && serviceCategory ? ['Category', serviceCategory] : null,
+          isLab && sampleType ? ['Sample Type', sampleType] : null,
+          ['Hospital / Facility', hospitalName || 'MEDPARK Hospital'],
+          ['Scheduled Slot', `${date || 'N/A'} at ${time || 'N/A'}`],
+          petName ? ['Pet Details', `${petName} ${species ? `(${species}${breed ? ` - ${breed}` : ''})` : ''}`] : null,
+          ['Status', 'Cancelled']
+        ].filter(Boolean))}
+
+        ${isPaid && netRefundNum > 0 ? `
+          <h3 style="color: #1e3a8a; margin-top: 24px; margin-bottom: 8px; font-size: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
+            💳 Refund & Financial Breakdown
+          </h3>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:12px 0 16px 0; border:1px solid #e2e8f0; border-radius:10px; background-color:#f8fafc; overflow:hidden;">
+            <tr>
+              <td style="padding:10px 16px; font-size:13px; color:#64748b; font-weight:600; border-bottom:1px solid #edf2f7;">Original Amount Paid</td>
+              <td style="padding:10px 16px; font-size:13px; color:#1e293b; font-weight:700; text-align:right; border-bottom:1px solid #edf2f7;">₹${originalPaidNum.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 16px; font-size:13px; color:#b91c1c; font-weight:600; border-bottom:1px solid #edf2f7;">Cancellation Charge (Deducted)</td>
+              <td style="padding:10px 16px; font-size:13px; color:#b91c1c; font-weight:700; text-align:right; border-bottom:1px solid #edf2f7;">-₹${cancelFeeNum.toFixed(2)}</td>
+            </tr>
+            <tr style="background-color:#f0fdf4;">
+              <td style="padding:12px 16px; font-size:14px; color:#15803d; font-weight:800;">Net Refund Credited</td>
+              <td style="padding:12px 16px; font-size:16px; color:#15803d; font-weight:900; text-align:right;">₹${netRefundNum.toFixed(2)}</td>
+            </tr>
+          </table>
+
+          <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 14px 18px; margin-bottom: 18px;">
+            <p style="margin: 0; font-size: 13px; color: #166534; font-weight: 700;">
+              ✔ Refund Status: ${escapeHtml(refundStatus)}
+            </p>
+            ${refundId ? `
+              <p style="margin: 4px 0 0 0; font-size: 12px; color: #166534;">
+                Refund Reference ID: <code style="background:#dcfce7; padding:2px 6px; border-radius:4px; font-family:monospace;">${escapeHtml(refundId)}</code>
+              </p>
+            ` : ''}
+            <p style="margin: 6px 0 0 0; font-size: 12px; color: #15803d; line-height: 1.5;">
+              The net refund of <strong>₹${netRefundNum.toFixed(2)}</strong> has been initiated via <strong>${paymentMethod || 'Original Payment Method'}</strong> and will reflect in your bank/card account within <strong>5–7 business days</strong>.
+            </p>
+          </div>
+        ` : `
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px; margin-top: 16px;">
+            <p style="margin: 0; font-size: 13px; color: #475569;">
+              No payment was charged or this booking was registered without pre-payment. No refund transaction is required.
+            </p>
+          </div>
+        `}
+
+        <div style="margin-top: 24px;">
+          ${button(
+            isLab ? `${FRONTEND_REDIRECT_URL}/dashboard/services` : `${FRONTEND_REDIRECT_URL}/dashboard/book-appointment`,
+            isLab ? '🧪 Book Another Diagnostic Test' : '📅 Book a New Consultation'
+          )}
+        </div>
+
+        <p style="margin: 20px 0 0 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+          Have questions regarding your refund or cancellation? Contact our medical billing support team directly or reply to this email.
+        </p>
+      `,
+      footNote: 'You received this notification because your booking on MEDPARK was cancelled.',
+      showQuote: true
+    })
+  };
+};
 
 // ─── Contact Templates ─────────────────────────────────────────
 

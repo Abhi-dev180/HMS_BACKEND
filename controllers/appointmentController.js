@@ -21,11 +21,173 @@ const {
 } = require('../services/googleCalendarService');
 const { broadcast } = require('../services/websocketService');
 const { getDailyTimeSlots } = require('../services/schedulerService');
+const { createRefund } = require('../services/stripeService');
+const razorpaySvc = require('../services/razorpayService');
 
 const T = 'appointments';
 const STATUSES = ['Pending', 'Confirmed', 'In Progress', 'Completed', 'Cancelled'];
 const LOCKED_STATUSES = ['Completed', 'Cancelled'];
 const ALLOWED_SLOTS = getDailyTimeSlots();
+
+// ─── Helper: Calculate cancellation fee and net refund amount ─
+const calculateCancellationFeeAndRefund = (appointment) => {
+  const isPaid = String(appointment.paymentStatus || '').toLowerCase() === 'paid';
+  const amountPaid = Number(appointment.paymentAmount || appointment.servicePrice || 0);
+
+  if (!isPaid || amountPaid <= 0) {
+    return {
+      isPaid: false,
+      amountPaid: 0,
+      cancellationFee: 0,
+      refundAmount: 0,
+      refundStatus: 'No Refund'
+    };
+  }
+
+  // 10% standard cancellation fee
+  const cancellationFee = Math.round(amountPaid * 0.10 * 100) / 100;
+  const refundAmount = Math.max(0, Math.round((amountPaid - cancellationFee) * 100) / 100);
+
+  return {
+    isPaid: true,
+    amountPaid,
+    cancellationFee,
+    refundAmount,
+    refundStatus: refundAmount > 0 ? 'Refunded' : 'No Refund'
+  };
+};
+
+// ─── Helper: Execute complete cancellation workflow ───────────
+const executeAppointmentCancellation = async ({ appointment, reason = '', cancelledBy = 'user' }) => {
+  const refundCalc = calculateCancellationFeeAndRefund(appointment);
+  let refundId = null;
+
+  if (refundCalc.isPaid && refundCalc.refundAmount > 0) {
+    const isRazorpay =
+      String(appointment.paymentMethod || '').toLowerCase().includes('razorpay') ||
+      (appointment.paymentId && String(appointment.paymentId).startsWith('pay_'));
+
+    try {
+      if (isRazorpay) {
+        const rzpRefund = await razorpaySvc.createRefund({
+          paymentId: appointment.paymentId,
+          amountInr: refundCalc.refundAmount,
+          notes: {
+            appointmentNumber: appointment.appointment_number,
+            reason: reason || 'Appointment cancellation'
+          }
+        });
+        refundId = rzpRefund.refundId || `rfnd_${Date.now()}`;
+      } else {
+        const refundRes = await createRefund({
+          paymentIntentId: appointment.paymentId && appointment.paymentId.startsWith('pi_') ? appointment.paymentId : null,
+          sessionId: appointment.stripe_session_id || null,
+          paymentId: appointment.paymentId || null,
+          amountInr: refundCalc.refundAmount,
+          reason: 'requested_by_customer'
+        });
+        refundId = refundRes.refundId || `re_${Date.now()}`;
+      }
+    } catch (err) {
+      console.error('[appointments] Gateway refund error:', err.message);
+      refundId = `re_err_${Date.now()}`;
+      refundCalc.refundStatus = 'Refund Failed / Pending Manual Review';
+    }
+  }
+
+  // Delete Google Calendar event if present
+  if (appointment.google_event_id) {
+    try {
+      await deleteCalendarEvent(appointment.google_event_id);
+    } catch (calErr) {
+      console.error('[appointments] Google calendar deletion error:', calErr.message);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const safeReason = reason && String(reason).trim() ? String(reason).trim() : `Cancelled by ${cancelledBy}`;
+  const patch = {
+    status: 'Cancelled',
+    cancellationReason: safeReason,
+    cancellationFee: refundCalc.cancellationFee,
+    refundAmount: refundCalc.refundAmount,
+    refundStatus: refundCalc.refundStatus,
+    refundId: refundId,
+    cancelledAt: now,
+    updatedAt: now,
+    google_event_id: null
+  };
+
+  let updatedAppointment = null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from(T).update(patch).eq('id', appointment.id).select().single();
+      if (!error && data) updatedAppointment = data;
+    } catch (e) {
+      console.warn('[appointments] Supabase cancel update warning:', e.message);
+    }
+  }
+
+  const db = readDB();
+  db.appointments = db.appointments || [];
+  const idx = db.appointments.findIndex((a) => String(a.id) === String(appointment.id));
+  if (idx !== -1) {
+    db.appointments[idx] = { ...db.appointments[idx], ...patch };
+    writeDB(db);
+    if (!updatedAppointment) updatedAppointment = db.appointments[idx];
+  } else if (!updatedAppointment) {
+    updatedAppointment = { ...appointment, ...patch };
+  }
+
+  // Send cancellation and refund receipt email
+  const userEmail = await getUserEmail(updatedAppointment);
+  if (userEmail) {
+    sendAppointmentCancelled({
+      to: userEmail,
+      appointment: updatedAppointment,
+      patientName: updatedAppointment.patientName,
+      hospitalName: updatedAppointment.hospital,
+      date: updatedAppointment.date,
+      time: updatedAppointment.time,
+      reason: updatedAppointment.cancellationReason,
+      appointmentNumber: updatedAppointment.appointment_number,
+      appointmentType: updatedAppointment.appointmentType,
+      serviceName: updatedAppointment.serviceName,
+      serviceCategory: updatedAppointment.serviceCategory,
+      sampleType: updatedAppointment.sampleType,
+      doctorName: updatedAppointment.doctorName,
+      petName: updatedAppointment.petName,
+      species: updatedAppointment.species,
+      breed: updatedAppointment.breed,
+      paymentStatus: updatedAppointment.paymentStatus,
+      paymentAmount: updatedAppointment.paymentAmount,
+      paymentMethod: updatedAppointment.paymentMethod,
+      cancellationFee: updatedAppointment.cancellationFee,
+      refundAmount: updatedAppointment.refundAmount,
+      refundId: updatedAppointment.refundId,
+      refundStatus: updatedAppointment.refundStatus
+    }).catch((e) => console.error('[appointments] cancellation email failed:', e));
+  }
+
+  // Send notification to superadmin
+  sendAppointmentNewToSuperAdmin({
+    patientName: updatedAppointment.patientName,
+    patientPhone: updatedAppointment.patientPhone,
+    email: userEmail || '',
+    hospitalName: updatedAppointment.hospital,
+    date: updatedAppointment.date,
+    time: updatedAppointment.time,
+    petName: updatedAppointment.petName,
+    description: `CANCELLED (${cancelledBy}). Reason: ${updatedAppointment.cancellationReason}. Refund: ₹${updatedAppointment.refundAmount} (Fee: ₹${updatedAppointment.cancellationFee})`,
+    source: 'cancellation',
+    appointmentNumber: updatedAppointment.appointment_number
+  }).catch((e) => console.error('[appointments] superadmin cancel notification failed:', e));
+
+  broadcast('appointment_updated', updatedAppointment);
+  broadcast('appointment_cancelled', { id: updatedAppointment.id, appointmentNumber: updatedAppointment.appointment_number });
+
+  return updatedAppointment;
+};
 
 // ─── Helper: format time string to HH:mm ──────────────────────
 const formatTimeString = (t) => {
@@ -617,6 +779,8 @@ const filterLocalAppointments = (dbAppointments, req) => {
       list = list.filter((a) => a.appointmentType === 'Lab Test' || Boolean(a.serviceName));
     } else if (type === 'consult') {
       list = list.filter((a) => a.appointmentType !== 'Lab Test' && !a.serviceName);
+    } else if (type === 'refunds') {
+      list = list.filter((a) => a.status === 'Cancelled' || (a.refundAmount && a.refundAmount > 0) || a.refundStatus === 'Refunded');
     }
   }
   if (search && search.trim()) {
@@ -632,6 +796,10 @@ const filterLocalAppointments = (dbAppointments, req) => {
       (a.sampleType || '').toLowerCase().includes(term) ||
       (a.doctorName || '').toLowerCase().includes(term) ||
       (a.appointmentType || '').toLowerCase().includes(term) ||
+      (a.refundId || '').toLowerCase().includes(term) ||
+      (a.cancellationReason || '').toLowerCase().includes(term) ||
+      (a.refundStatus || '').toLowerCase().includes(term) ||
+      (a.paymentMethod || '').toLowerCase().includes(term) ||
       (a.appointment_number ? String(a.appointment_number).includes(term) : false)
     );
   }
@@ -688,35 +856,131 @@ const getAppointments = async (req, res) => {
   }
 };
 
+// ─── POST /api/appointments/:id/cancel (authenticated) ───────
+const cancelAppointment = async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body || {};
+
+  try {
+    let appointment = null;
+    if (supabase) {
+      try {
+        const { data } = await supabase.from(T).select('*').eq('id', id).maybeSingle();
+        if (data) appointment = data;
+      } catch (_) {}
+    }
+    if (!appointment) {
+      const db = readDB();
+      appointment = (db.appointments || []).find((a) => String(a.id) === String(id));
+    }
+
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    // Role ownership check
+    if (req.user?.role === 'user') {
+      const uid = String(req.user.id || '');
+      const uemail = String(req.user.email || '').toLowerCase();
+      const matchId = appointment.userId && String(appointment.userId) === uid;
+      const matchEmail = appointment.email && String(appointment.email).toLowerCase() === uemail;
+      if (!matchId && !matchEmail) {
+        return res.status(403).json({ message: 'Forbidden: You can only cancel your own appointments' });
+      }
+    } else if (req.user?.role === 'admin') {
+      if (String(appointment.hospitalId) !== String(req.user.hospitalId)) {
+        return res.status(403).json({ message: 'Forbidden: You can only cancel appointments for your hospital' });
+      }
+    }
+
+    if (appointment.status === 'Cancelled') {
+      return res.status(409).json({ message: 'This appointment is already cancelled.' });
+    }
+    if (appointment.status === 'Completed') {
+      return res.status(409).json({ message: 'A completed appointment cannot be cancelled.' });
+    }
+
+    const updated = await executeAppointmentCancellation({
+      appointment,
+      reason: reason || 'Cancelled by patient',
+      cancelledBy: req.user?.role || 'user'
+    });
+
+    return res.json({
+      message: 'Appointment cancelled and refund processed successfully.',
+      appointment: updated
+    });
+  } catch (error) {
+    console.error('[appointments] cancelAppointment error:', error);
+    return res.status(500).json({ message: error.message || 'Failed to cancel appointment' });
+  }
+};
+
 // ─── PUT /api/appointments/:id/status ────────────────────────
 const updateAppointmentStatus = async (req, res) => {
-  const { status } = req.body;
+  const { status, reason, message } = req.body;
   if (!status || !STATUSES.includes(status)) {
     return res.status(400).json({ message: `Status must be one of: ${STATUSES.join(', ')}` });
   }
 
-  const { data: existing, error: fetchError } = await supabase
-    .from(T)
-    .select('*')
-    .eq('id', req.params.id)
-    .single();
-  if (fetchError || !existing) {
+  let existing = null;
+  if (supabase) {
+    try {
+      const { data, error: fetchError } = await supabase
+        .from(T)
+        .select('*')
+        .eq('id', req.params.id)
+        .maybeSingle();
+      if (!fetchError && data) existing = data;
+    } catch (_) {}
+  }
+  if (!existing) {
+    const db = readDB();
+    existing = (db.appointments || []).find((a) => String(a.id) === String(req.params.id));
+  }
+
+  if (!existing) {
     return res.status(404).json({ message: 'Appointment not found' });
   }
 
-  if (status === 'Cancelled' && existing.google_event_id) {
+  // If cancelling, execute full refund and cancellation flow
+  if (status === 'Cancelled') {
+    const updated = await executeAppointmentCancellation({
+      appointment: existing,
+      reason: reason || message || 'Status updated to Cancelled by admin',
+      cancelledBy: req.user?.role || 'admin'
+    });
+    return res.json({ message: 'Appointment cancelled and refund processed', appointment: updated });
+  }
+
+  if (existing.google_event_id && status === 'Cancelled') {
     await syncGoogleCalendar('delete', existing);
   }
 
-  const { data, error } = await supabase
-    .from(T)
-    .update({ status, updatedAt: new Date().toISOString() })
-    .eq('id', req.params.id)
-    .select()
-    .single();
-  if (error) {
-    console.error('[appointments] updateStatus error:', error);
-    return res.status(500).json({ message: 'Failed to update status' });
+  let data = null;
+  if (supabase) {
+    try {
+      const resUpd = await supabase
+        .from(T)
+        .update({ status, updatedAt: new Date().toISOString() })
+        .eq('id', req.params.id)
+        .select()
+        .single();
+      if (!resUpd.error && resUpd.data) data = resUpd.data;
+    } catch (_) {}
+  }
+
+  if (!data) {
+    const db = readDB();
+    const idx = (db.appointments || []).findIndex((a) => String(a.id) === String(req.params.id));
+    if (idx !== -1) {
+      db.appointments[idx].status = status;
+      db.appointments[idx].updatedAt = new Date().toISOString();
+      writeDB(db);
+      data = db.appointments[idx];
+    } else {
+      data = { ...existing, status, updatedAt: new Date().toISOString() };
+    }
   }
 
   const userEmail = await getUserEmail(existing);
@@ -728,7 +992,7 @@ const updateAppointmentStatus = async (req, res) => {
       date: existing.date,
       time: existing.time,
       status: status,
-      message: req.body.message || undefined,
+      message: message || undefined,
       appointmentNumber: existing.appointment_number
     }).catch((e) => console.error('[appointments] status update email failed:', e));
   }
@@ -744,11 +1008,30 @@ const updateAppointmentStatus = async (req, res) => {
 // ─── PUT /api/appointments/:id (full update) ──────────────────
 const updateAppointment = async (req, res) => {
   const { id } = req.params;
-  const { data: arr } = await supabase.from(T).select('*').eq('id', id).limit(1);
-  const appt = arr && arr[0];
+  let appt = null;
+  if (supabase) {
+    try {
+      const { data: arr } = await supabase.from(T).select('*').eq('id', id).limit(1);
+      if (arr && arr[0]) appt = arr[0];
+    } catch (_) {}
+  }
+  if (!appt) {
+    const db = readDB();
+    appt = (db.appointments || []).find((a) => String(a.id) === String(id));
+  }
+
   if (!appt) return res.status(404).json({ message: 'Appointment not found' });
-  if (req.user.role === 'user' && appt.userId !== req.user.id) {
+  if (req.user.role === 'user' && appt.userId && appt.userId !== req.user.id) {
     return res.status(403).json({ message: 'Forbidden' });
+  }
+
+  if (req.body.status === 'Cancelled' && appt.status !== 'Cancelled') {
+    const updated = await executeAppointmentCancellation({
+      appointment: appt,
+      reason: req.body.reason || req.body.cancellationReason || 'Cancelled by user',
+      cancelledBy: req.user.role || 'user'
+    });
+    return res.json({ message: 'Appointment cancelled and refund processed successfully', appointment: updated });
   }
 
   const fields = [
@@ -787,10 +1070,24 @@ const updateAppointment = async (req, res) => {
     }
   }
 
-  const { data, error } = await supabase.from(T).update(patch).eq('id', id).select().single();
-  if (error) {
-    console.error('[appointments] update error:', error);
-    return res.status(500).json({ message: 'Could not update appointment' });
+  let data = null;
+  if (supabase) {
+    try {
+      const resUpd = await supabase.from(T).update(patch).eq('id', id).select().single();
+      if (!resUpd.error && resUpd.data) data = resUpd.data;
+    } catch (_) {}
+  }
+
+  if (!data) {
+    const db = readDB();
+    const idx = (db.appointments || []).findIndex((a) => String(a.id) === String(id));
+    if (idx !== -1) {
+      db.appointments[idx] = { ...db.appointments[idx], ...patch };
+      writeDB(db);
+      data = db.appointments[idx];
+    } else {
+      data = { ...appt, ...patch };
+    }
   }
 
   if (patch.date && patch.time && appt.google_event_id) {
@@ -1065,6 +1362,9 @@ module.exports = {
   getAppointments,
   updateAppointmentStatus,
   updateAppointment,
+  cancelAppointment,
+  executeAppointmentCancellation,
+  calculateCancellationFeeAndRefund,
   deleteAppointment,
   getBookedSlots,
   lookupAppointments,

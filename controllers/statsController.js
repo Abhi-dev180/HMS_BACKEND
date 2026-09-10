@@ -194,6 +194,16 @@ const getOverviewStats = async (req, res) => {
     const consultsConfirmed = allMergedAppts.filter((a) => !isTestBooking(a) && a.status === 'Confirmed').length;
     const consultsCompleted = allMergedAppts.filter((a) => !isTestBooking(a) && a.status === 'Completed').length;
 
+    // ─── Calculate Refunds & Cancellations Breakdown ──────────
+    const refundedAppts = allMergedAppts.filter(
+      (a) => a.status === 'Cancelled' && (Number(a.refundAmount) > 0 || Boolean(a.refundStatus) || Boolean(a.refundId))
+    );
+    const totalRefundedAmount = refundedAppts.reduce((sum, a) => sum + Number(a.refundAmount || 0), 0);
+    const totalFeesRetained = refundedAppts.reduce((sum, a) => sum + Number(a.cancellationFee || 0), 0);
+    const recentRefundsList = [...refundedAppts].sort(
+      (a, b) => new Date(b.cancelledAt || b.updatedAt || 0) - new Date(a.cancelledAt || a.updatedAt || 0)
+    );
+
     // ─── Hospital Status Chart Breakdown ──────────────────────
     const allHospitals = db.hospitals || [];
     const hospTotal = hospitalsTotal || allHospitals.length || 0;
@@ -258,6 +268,13 @@ const getOverviewStats = async (req, res) => {
       growthChart: {
         monthly: growthMonthly,
         weekly: growthWeekly
+      },
+      refunds: {
+        totalCount: refundedAppts.length,
+        totalAmount: totalRefundedAmount,
+        totalFeesRetained: totalFeesRetained,
+        recent: recentRefundsList.slice(0, 10),
+        list: recentRefundsList
       },
       registrations: {
         total: registrationsTotal || 0,

@@ -7,6 +7,7 @@ const {
   getAppointments,
   updateAppointmentStatus,
   updateAppointment,
+  cancelAppointment,
   deleteAppointment,
   getBookedSlots,
   lookupAppointments,
@@ -31,6 +32,9 @@ router.delete('/public/:id', cancelPublicAppointment);
 // ─── Authenticated routes ────────────────────────────────────
 router.post('/', authMiddleware, bookAppointment);
 router.get('/', authMiddleware, getAppointments);
+
+// Cancel & refund appointment
+router.post('/:id/cancel', authMiddleware, cancelAppointment);
 
 // Status update – admin/superadmin only
 router.put('/:id/status', authMiddleware, roleMiddleware(['superadmin', 'admin']), updateAppointmentStatus);
