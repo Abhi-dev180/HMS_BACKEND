@@ -201,7 +201,7 @@ const createRegistration = async (req, res) => {
     } catch (e) {}
   }
 
-  const regId = `reg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const regId = crypto.randomUUID();
   const row = {
     id: regId,
     booking_id: booking?.id || null,
@@ -277,23 +277,114 @@ const getPrefill = async (req, res) => {
 
 // ─── GET /api/registrations ──────────────────────────────────
 const listRegistrations = async (req, res) => {
-  if (!isConfigured()) return notConfigured(res);
-  const { data, error } = await supabase.from(TABLE).select('*').order('created_at', { ascending: false });
-  if (error) {
-    console.error('[registrations] list error:', error);
-    return res.status(500).json({ message: 'Could not load registrations' });
+  const { readDB } = require('../models');
+  const db = readDB();
+
+  let supaRegs = [];
+  if (isConfigured()) {
+    try {
+      const { data, error } = await supabase.from(TABLE).select('*').order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) supaRegs = data;
+      else if (error) console.error('[registrations] list error:', error);
+    } catch (e) {
+      console.error('[registrations] list exception:', e.message);
+    }
   }
-  const counts = data.reduce((acc, r) => { acc.total += 1; acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, { total: 0, pending: 0, approved: 0, denied: 0, active: 0, inactive: 0 });
+
+  const localRegs = db.registrations || [];
+  const regMap = new Map();
+  supaRegs.forEach((r) => regMap.set(String(r.id), r));
+  localRegs.forEach((r) => {
+    if (!regMap.has(String(r.id))) {
+      regMap.set(String(r.id), r);
+    }
+  });
+
+  const data = Array.from(regMap.values());
+  const counts = data.reduce(
+    (acc, r) => {
+      acc.total += 1;
+      acc[r.status] = (acc[r.status] || 0) + 1;
+      return acc;
+    },
+    { total: 0, pending: 0, approved: 0, denied: 0, active: 0, inactive: 0 }
+  );
 
   const registrations = await Promise.all(data.map((r) => enhanceRegistration(r)));
 
   return res.json({ registrations, counts });
 };
 
+// ─── Helper: Ensure hospital entity exists for registration ──
+const ensureHospital = async (reg) => {
+  if (reg.hospital_id) return reg.hospital_id;
+
+  const { readDB, writeDB } = require('../models');
+  const db = readDB();
+  db.hospitals = db.hospitals || [];
+
+  let existingHosp = null;
+  if (isConfigured()) {
+    try {
+      const { data } = await supabase
+        .from('hospitals')
+        .select('id, name')
+        .ilike('name', reg.hospital_name)
+        .maybeSingle();
+      if (data) existingHosp = data;
+    } catch (_) {}
+  }
+  if (!existingHosp) {
+    existingHosp = db.hospitals.find(
+      (h) => (h.name || '').toLowerCase() === (reg.hospital_name || '').trim().toLowerCase()
+    );
+  }
+
+  if (existingHosp) {
+    return String(existingHosp.id);
+  }
+
+  // Auto-create hospital
+  const hospId = Date.now().toString();
+  const newHospital = {
+    id: hospId,
+    name: reg.hospital_name,
+    location: reg.city || reg.address || 'Punjab',
+    city: reg.city || 'Punjab',
+    address: reg.address || reg.city || 'Punjab',
+    phone: reg.phone || '',
+    email: reg.email || '',
+    beds: reg.beds || 10,
+    status: 'enabled',
+    active: true,
+    rating: 4.8,
+    reviews: 0,
+    image: 'https://images.unsplash.com/photo-1583337130417-3346a1be7dee?auto=format&fit=crop&w=600&q=80',
+    departments: ['General Veterinary', 'Diagnostics', 'Emergency Care'],
+    created_at: new Date().toISOString()
+  };
+
+  if (isConfigured()) {
+    try {
+      await supabase.from('hospitals').insert(newHospital);
+    } catch (err) {
+      console.warn('[registrations] Supabase hospital auto-create:', err.message);
+    }
+  }
+
+  db.hospitals.unshift(newHospital);
+  writeDB(db);
+
+  return hospId;
+};
+
 // ─── Ensure admin user ──────────────────────────────────────
 const ensureAdminUser = async (reg) => {
   const existing = await Users.findByEmail(reg.email);
   if (existing) {
+    if (reg.hospital_id && (!existing.hospitalId || existing.hospitalId !== reg.hospital_id)) {
+      await Users.update(existing.id, { hospitalId: String(reg.hospital_id), hospital: reg.hospital_name });
+    }
     return { user: existing, tempPassword: null, created: false };
   }
 
@@ -328,6 +419,10 @@ const updateRegistrationStatus = async (req, res) => {
   const update = { status, updated_at: new Date().toISOString() };
 
   if (status === 'approved' || status === 'active') {
+    const hospId = await ensureHospital(reg);
+    reg.hospital_id = hospId;
+    update.hospital_id = hospId;
+
     const { user, tempPassword: pwd } = await ensureAdminUser(reg);
     update.admin_user_id = user.id;
     if (status === 'approved') update.status = 'active';
