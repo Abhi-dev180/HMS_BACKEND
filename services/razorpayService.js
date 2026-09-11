@@ -22,18 +22,23 @@ class RazorpayService {
 
   async createOrder({ booking, planKey, amount }) {
     console.log('[Razorpay] Creating order for:', { booking, planKey, amount });
-    
-    // Amount in Razorpay must be in smallest currency unit (e.g., paise)
-    // If the amount is in USD cents, it needs to be converted if Razorpay is INR only.
-    // For this example, assuming INR for Razorpay. (e.g., if amount was $10 (1000 cents), maybe treat as ₹800 (80000 paise)). 
-    // We'll just pass the amount directly for simplicity.
     const currency = 'INR';
+
+    // Determine amount in paise:
+    // If planKey is provided, amount is in USD cents (e.g. 4900 = $49), convert to INR paise (~83 INR/USD)
+    // If appointment/test fee, amount is in INR rupees (e.g. 500 INR), convert to paise (* 100)
+    let amountInPaise;
+    if (planKey) {
+      amountInPaise = Math.max(100, Math.round((Number(amount) / 100) * 83 * 100));
+    } else {
+      amountInPaise = Math.max(100, Math.round(Number(amount || 500) * 100));
+    }
 
     if (this.isDummy) {
       const dummyOrderId = `order_${crypto.randomBytes(8).toString('hex')}`;
       return {
         id: dummyOrderId,
-        amount: amount * 80, // rough conversion for dummy
+        amount: amountInPaise,
         currency,
         status: 'created',
         key_id: this.key_id
@@ -42,9 +47,9 @@ class RazorpayService {
 
     try {
       const order = await this.razorpay.orders.create({
-        amount: amount * 80, // Converting roughly from USD cents to INR paise for the demo
+        amount: amountInPaise,
         currency,
-        receipt: `receipt_${Date.now()}`
+        receipt: `rcpt_${Date.now()}`
       });
       order.key_id = this.key_id;
       return order;

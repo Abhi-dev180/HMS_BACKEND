@@ -119,8 +119,21 @@ router.post('/create-checkout-session', async (req, res) => {
 
 const { generateInvoice, generateAppointmentInvoice } = require('../services/invoiceService');
 const { readDB, writeDB } = require('../models');
+const { getBookedSlotsForDate } = require('../services/googleCalendarService');
 const emailSvc = require('../services/emailService');
 const { broadcast } = require('../services/websocketService');
+
+// ─── Format time string to HH:mm (normalize HH:MM:SS -> HH:MM) ───
+const formatTimeString = (t) => {
+  if (!t) return '';
+  const clean = String(t).trim();
+  const m = clean.match(/^(\d{1,2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+  if (m) {
+    const [h, mm] = m[1].split(':');
+    return `${String(h).padStart(2, '0')}:${mm}`;
+  }
+  return clean;
+};
 
 // ─── Create appointment checkout session (Stripe one-time test/consult fee) ───
 router.post('/create-appointment-checkout', async (req, res) => {
@@ -134,6 +147,20 @@ router.post('/create-appointment-checkout', async (req, res) => {
       return res.status(533).json({ message: 'Stripe not configured' });
     }
 
+    const cleanDate = bookingDetails.date || new Date().toISOString().split('T')[0];
+    const cleanTime = formatTimeString(bookingDetails.time || '10:00');
+    const cleanHospitalId = bookingDetails.hospitalId || '';
+
+    // Verify time slot availability to prevent double-booking
+    try {
+      const booked = await getBookedSlotsForDate(cleanDate, cleanHospitalId);
+      if (Array.isArray(booked) && booked.includes(cleanTime)) {
+        return res.status(409).json({ message: 'That time slot is already booked. Please choose another time.' });
+      }
+    } catch (slotErr) {
+      console.warn('[payments] Slot check error during checkout creation:', slotErr);
+    }
+
     const isLab = bookingDetails.appointmentType === 'Lab Test' || Boolean(bookingDetails.serviceName);
     const amountInr = Number(bookingDetails.amount || bookingDetails.servicePrice || 500);
     const apptNumber = Math.floor(1000 + Math.random() * 9000);
@@ -143,11 +170,11 @@ router.post('/create-appointment-checkout', async (req, res) => {
     const appointmentRow = {
       id: apptId,
       userId: bookingDetails.userId || (req.user ? req.user.id : null),
-      hospitalId: bookingDetails.hospitalId || '',
+      hospitalId: cleanHospitalId,
       hospital: bookingDetails.hospitalName || 'MEDPARK Hospital',
       doctorName: bookingDetails.doctorName || (isLab ? `Lab: ${bookingDetails.serviceName || 'Diagnostics'}` : 'Any Available Doctor'),
-      date: bookingDetails.date || new Date().toISOString().split('T')[0],
-      time: bookingDetails.time || '10:00',
+      date: cleanDate,
+      time: cleanTime,
       patientName: bookingDetails.patientName || 'Patient',
       patientPhone: bookingDetails.patientPhone || '',
       email: bookingDetails.email || '',
@@ -523,7 +550,7 @@ router.post('/paypal/capture-order', async (req, res) => {
 // ─── Razorpay Routes ───────────────────────────────────────────
 router.post('/razorpay/create-order', async (req, res) => {
   try {
-    const { booking, planKey } = req.body;
+    const { booking, planKey, amount } = req.body;
 
     // Prevent double payments
     if (booking?.id && isValidUUID(booking.id)) {
@@ -538,17 +565,18 @@ router.post('/razorpay/create-order', async (req, res) => {
       }
     }
 
-    const plan = PLANS[planKey] || PLANS['basic'];
-    const order = await razorpaySvc.createOrder({ booking, planKey, amount: plan.amount });
+    const plan = planKey ? (PLANS[planKey] || PLANS['basic']) : null;
+    const orderAmount = amount !== undefined ? Number(amount) : (plan ? plan.amount : 500);
+    const order = await razorpaySvc.createOrder({ booking, planKey, amount: orderAmount });
     
     if (booking?.id && isValidUUID(booking.id)) {
       await supabase.from('payments').insert({
         booking_id: booking.id,
         email: booking.email || 'customer@example.com',
         razorpay_order_id: order.id,
-        plan_key: planKey || 'basic',
-        amount: plan.amount,
-        currency: 'usd',
+        plan_key: planKey || 'appointment',
+        amount: orderAmount,
+        currency: 'INR',
         status: 'pending'
       });
     }

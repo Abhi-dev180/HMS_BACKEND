@@ -56,7 +56,128 @@ const publicView = (r) => ({
   createdAt: r.created_at
 });
 
-// ─── POST /api/registrations ──────────────────────────────────
+// ─── Unified Helper: Enhance Registration with Payment, Plan & Subscription Dates ───
+const enhanceRegistration = async (r) => {
+  if (!r) return null;
+  const base = publicView(r);
+  try {
+    let payment = null;
+    if (r.booking_id && isConfigured()) {
+      const p = await supabase
+        .from('payments')
+        .select('*')
+        .eq('booking_id', r.booking_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      payment = p?.data || null;
+    }
+    if (!payment && r.email && isConfigured()) {
+      const p2 = await supabase
+        .from('payments')
+        .select('*')
+        .eq('email', r.email)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      payment = p2?.data || null;
+    }
+    if (!payment && r.admin_user_id && isConfigured()) {
+      const p3 = await supabase
+        .from('payments')
+        .select('*')
+        .eq('user_id', r.admin_user_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      payment = p3?.data || null;
+    }
+
+    let subscription = null;
+    if (payment && payment.subscription_id && isConfigured()) {
+      const resSub = await supabase.from('subscriptions').select('*').eq('id', payment.subscription_id).maybeSingle();
+      subscription = resSub?.data || null;
+    }
+    if (!subscription && r.admin_user_id && isConfigured()) {
+      const resSub = await supabase.from('subscriptions').select('*').eq('user_id', r.admin_user_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      subscription = resSub?.data || null;
+    }
+    if (!subscription && r.hospital_id && isConfigured()) {
+      const resSub = await supabase.from('subscriptions').select('*').eq('hospital_id', r.hospital_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      subscription = resSub?.data || null;
+    }
+    if (!subscription && payment?.stripe_session_id && isConfigured()) {
+      const fallbackKey = `one_time_${payment.stripe_session_id}`;
+      const resSub = await supabase.from('subscriptions').select('*').eq('stripe_subscription_id', fallbackKey).maybeSingle();
+      subscription = resSub?.data || null;
+    }
+    if (!subscription && payment?.stripe_session_id && isConfigured()) {
+      const resSub2 = await supabase.from('subscriptions').select('*').eq('stripe_subscription_id', payment.stripe_session_id).maybeSingle();
+      subscription = resSub2?.data || null;
+    }
+
+    // Check local db fallback if needed
+    const { readDB } = require('../models');
+    const db = readDB();
+    if (!subscription && db.subscriptions) {
+      subscription = db.subscriptions.find((s) =>
+        (r.admin_user_id && String(s.user_id) === String(r.admin_user_id)) ||
+        (r.hospital_id && String(s.hospital_id) === String(r.hospital_id)) ||
+        (r.email && String(s.email || '').toLowerCase() === String(r.email).toLowerCase()) ||
+        (payment?.subscription_id && String(s.id) === String(payment.subscription_id)) ||
+        (payment?.stripe_session_id && (s.stripe_subscription_id === payment.stripe_session_id || s.stripe_subscription_id === `one_time_${payment.stripe_session_id}`))
+      ) || null;
+    }
+    if (!payment && db.payments) {
+      payment = db.payments.find((p) =>
+        (r.booking_id && String(p.booking_id) === String(r.booking_id)) ||
+        (r.email && String(p.email || '').toLowerCase() === String(r.email).toLowerCase()) ||
+        (r.admin_user_id && String(p.user_id) === String(r.admin_user_id))
+      ) || null;
+    }
+
+    let adminUser = null;
+    if (r.admin_user_id || r.email) {
+      adminUser = (r.admin_user_id ? await Users.findById(r.admin_user_id) : null) || (r.email ? await Users.findByEmail(r.email) : null);
+    }
+
+    const planKey = subscription?.plan_key || payment?.plan_key || adminUser?.plan_key || adminUser?.planKey || 'mini';
+    const planMeta = PLANS[planKey] || { interval: 'month', interval_count: 1 };
+
+    const startDate = subscription?.start_date ||
+      adminUser?.plan_start ||
+      adminUser?.planStart ||
+      payment?.created_at ||
+      r.created_at ||
+      new Date().toISOString();
+
+    const expiryDate = subscription?.expiry_date ||
+      adminUser?.plan_end ||
+      adminUser?.planEnd ||
+      computeExpiry(startDate, planMeta);
+
+    const unifiedSub = {
+      id: subscription?.id || null,
+      plan_key: planKey,
+      start_date: startDate,
+      expiry_date: expiryDate,
+      status: subscription?.status || ((r.status === 'approved' || r.status === 'active') ? 'active' : (r.status || 'pending'))
+    };
+
+    return {
+      ...base,
+      payment: payment || null,
+      subscription: unifiedSub,
+      planKey,
+      planStart: startDate,
+      planEnd: expiryDate
+    };
+  } catch (e) {
+    console.error('[registrations] enhanceRegistration error:', e);
+    return base;
+  }
+};
+
 // ─── POST /api/registrations ──────────────────────────────────
 const createRegistration = async (req, res) => {
   const {
@@ -122,28 +243,7 @@ const createRegistration = async (req, res) => {
     .catch((e) => console.error('[registrations] received email failed:', e));
 
   try {
-    let payment = null;
-    if (data.booking_id) {
-      const p = await supabase.from('payments').select('*').eq('booking_id', data.booking_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
-      payment = p.data || null;
-    }
-    if (!payment) {
-      const p2 = await supabase.from('payments').select('*').eq('email', data.email).order('created_at', { ascending: false }).limit(1).maybeSingle();
-      payment = p2.data || null;
-    }
-
-    let subscription = null;
-    if (payment && payment.subscription_id) {
-      const s = await supabase.from('subscriptions').select('*').eq('id', payment.subscription_id).maybeSingle();
-      subscription = s.data || null;
-    }
-    if (!subscription && payment?.stripe_session_id) {
-      const fallbackKey = `one_time_${payment.stripe_session_id}`;
-      const s = await supabase.from('subscriptions').select('*').eq('stripe_subscription_id', fallbackKey).maybeSingle();
-      subscription = s.data || null;
-    }
-
-    const enhanced = { ...publicView(data), payment: payment || null, subscription: subscription || null };
+    const enhanced = await enhanceRegistration(data);
     broadcast('registration_created', enhanced);
     return res.status(201).json({ message: 'Registration submitted', registration: enhanced });
   } catch (e) {
@@ -185,33 +285,7 @@ const listRegistrations = async (req, res) => {
   }
   const counts = data.reduce((acc, r) => { acc.total += 1; acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, { total: 0, pending: 0, approved: 0, denied: 0, active: 0, inactive: 0 });
 
-  const registrations = await Promise.all(data.map(async (r) => {
-    try {
-      let payment = null;
-      if (r.booking_id) {
-        const p = await supabase.from('payments').select('*').eq('booking_id', r.booking_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
-        payment = p.data || null;
-      }
-      if (!payment) {
-        const p2 = await supabase.from('payments').select('*').eq('email', r.email).order('created_at', { ascending: false }).limit(1).maybeSingle();
-        payment = p2.data || null;
-      }
-
-      let subscription = null;
-      if (payment && payment.subscription_id) {
-        const resSub = await supabase.from('subscriptions').select('*').eq('id', payment.subscription_id).maybeSingle();
-        subscription = resSub.data || null;
-      }
-      if (!subscription && payment?.stripe_session_id) {
-        const fallbackKey = `one_time_${payment.stripe_session_id}`;
-        const resSub = await supabase.from('subscriptions').select('*').eq('stripe_subscription_id', fallbackKey).maybeSingle();
-        subscription = resSub.data || null;
-      }
-      return { ...publicView(r), payment: payment || null, subscription };
-    } catch (e) {
-      return publicView(r);
-    }
-  }));
+  const registrations = await Promise.all(data.map((r) => enhanceRegistration(r)));
 
   return res.json({ registrations, counts });
 };
@@ -437,8 +511,9 @@ const updateRegistrationStatus = async (req, res) => {
     console.error('[registrations] status error:', error);
     return res.status(500).json({ message: 'Could not update registration' });
   }
-  broadcast('registration_updated', publicView(data));
-  return res.json({ message: `Registration ${update.status}`, registration: publicView(data) });
+  const enhanced = await enhanceRegistration(data);
+  broadcast('registration_updated', enhanced);
+  return res.json({ message: `Registration ${update.status}`, registration: enhanced });
 };
 
 // ─── POST /api/registrations/:id/assign-hospital ──────────────
@@ -463,8 +538,9 @@ const assignHospital = async (req, res) => {
     console.error('[registrations] assign error:', error);
     return res.status(500).json({ message: 'Could not assign hospital' });
   }
-  broadcast('registration_updated', publicView(data));
-  return res.json({ message: 'Hospital assigned', registration: publicView(data) });
+  const enhanced = await enhanceRegistration(data);
+  broadcast('registration_updated', enhanced);
+  return res.json({ message: 'Hospital assigned', registration: enhanced });
 };
 
 // ─── DELETE /api/registrations/:id ────────────────────────────

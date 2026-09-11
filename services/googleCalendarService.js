@@ -1,9 +1,23 @@
 
 const { supabase } = require('../config/supabase');
+const { readDB } = require('../models');
 
 const GOOGLE_CALENDAR_API_KEY = process.env.GOOGLE_CALENDAR_API_KEY;
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || process.env.GOOGLE_USER || 'primary';
 const TIMEZONE = process.env.GOOGLE_CALENDAR_TIMEZONE || 'Asia/Calcutta';
+
+// ─── Format time string to HH:mm (normalize HH:MM:SS -> HH:MM) ───
+const formatTimeString = (t) => {
+  if (!t) return '';
+  const clean = String(t).trim();
+  // Match HH:MM or HH:MM:SS (optionally more precision) and normalize to HH:MM
+  const m = clean.match(/^(\d{1,2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+  if (m) {
+    const [h, mm] = m[1].split(':');
+    return `${String(h).padStart(2, '0')}:${mm}`;
+  }
+  return clean;
+};
 
 const getGoogleAccessToken = async () => {
   const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN;
@@ -39,30 +53,51 @@ const getGoogleAccessToken = async () => {
 };
 /**
  * Fetch booked time slots for a specific date and hospital.
- * Queries Google Calendar API (via OAuth2 or API Key) and merges with Supabase appointments.
+ * Queries Google Calendar API (via OAuth2 or API Key) and merges with Supabase and db.json appointments.
  */
 const getBookedSlotsForDate = async (dateStr, hospitalId) => {
   const bookedSlots = new Set();
 
   // 1. Query Supabase database appointments for the selected date
   try {
-    let query = supabase.from('appointments').select('time, date, status').eq('date', dateStr);
-    if (hospitalId) {
-      query = query.eq('hospitalId', String(hospitalId));
-    }
-    const { data, error } = await query;
-    if (!error && Array.isArray(data)) {
-      data.forEach((appt) => {
-        if (appt.status !== 'Cancelled' && appt.time) {
-          bookedSlots.add(formatTimeString(appt.time));
-        }
-      });
+    if (supabase) {
+      let query = supabase.from('appointments').select('time, date, status, hospitalId').eq('date', dateStr);
+      if (hospitalId) {
+        query = query.eq('hospitalId', String(hospitalId));
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        data.forEach((appt) => {
+          if (appt.status !== 'Cancelled' && appt.time) {
+            bookedSlots.add(formatTimeString(appt.time));
+          }
+        });
+      }
     }
   } catch (err) {
     console.error('[googleCalendarService] DB query error:', err);
   }
 
-  // 2. Query Google Calendar API via OAuth2 or API Key
+  // 2. Query local db.json appointments (hybrid sync fallback)
+  try {
+    const db = readDB();
+    if (db && Array.isArray(db.appointments)) {
+      db.appointments.forEach((appt) => {
+        if (
+          appt.date === dateStr &&
+          (!hospitalId || String(appt.hospitalId) === String(hospitalId)) &&
+          appt.status !== 'Cancelled' &&
+          appt.time
+        ) {
+          bookedSlots.add(formatTimeString(appt.time));
+        }
+      });
+    }
+  } catch (err) {
+    console.error('[googleCalendarService] Local DB query error:', err);
+  }
+
+  // 3. Query Google Calendar API via OAuth2 or API Key
   try {
     const accessToken = await getGoogleAccessToken();
     const timeMin = new Date(`${dateStr}T00:00:00Z`).toISOString();
@@ -96,7 +131,7 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
                   minute: '2-digit',
                   timeZone: TIMEZONE
                 });
-                bookedSlots.add(hhmm);
+                bookedSlots.add(formatTimeString(hhmm));
               } catch (e) {
                 console.error('[googleCalendarService] parsing event time failed:', e);
               }
@@ -110,19 +145,6 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
   }
 
   return Array.from(bookedSlots);
-};
-
-// ─── Format time string to HH:mm (normalize HH:MM:SS -> HH:MM) ───
-const formatTimeString = (t) => {
-  if (!t) return '';
-  const clean = String(t).trim();
-  // Match HH:MM or HH:MM:SS (optionally more precision) and normalize to HH:MM
-  const m = clean.match(/^(\d{1,2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/);
-  if (m) {
-    const [h, mm] = m[1].split(':');
-    return `${String(h).padStart(2, '0')}:${mm}`;
-  }
-  return clean;
 };
 
 // ─── Create a Google Calendar event ───────────────────────────

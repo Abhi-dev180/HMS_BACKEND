@@ -510,27 +510,6 @@ const profileUpdated = ({ name, email, changes, updatedAt }) => {
   };
 };
 
-// ─── Profile Updated Email ──────────────────────────────────
-// const sendProfileUpdatedEmail = ({ to, name, changes, updatedAt }) => {
-//   const subject = 'Profile Updated';
-//     console.log('[email] sendProfileUpdatedEmail:', { to, name, changes });
-
-//   const formattedDate = updatedAt ? new Date(updatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'Just now';
-//   const html = `
-//     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 12px;">
-//       <h2 style="color: #1e40af; margin-bottom: 4px;">Profile Updated</h2>
-//       <p style="color: #4b5563; margin-top: 4px;">Hello ${name || 'User'}, your profile has been successfully updated.</p>
-//       <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;">
-//         <p style="margin: 0 0 8px 0;"><strong>Changes made:</strong> ${changes || 'No changes recorded'}</p>
-//         <p style="margin: 0;"><strong>Updated at:</strong> ${formattedDate}</p>
-//       </div>
-//       <p style="color: #dc2626; font-size: 14px;">If you didn't make these changes, please contact support immediately.</p>
-//       <p style="color: #6b7280; font-size: 12px; margin-top: 16px;">This is an automated confirmation. Please do not reply.</p>
-//     </div>
-//   `;
-//   return send({ to, ...templates.profileUpdated({ name, email: to, changes, updatedAt }) });
-// };
-
 
 // ─── Contact Reply Email with Cloudinary / Attachments ────────
 const sendContactReplyEmail = ({ to, name, subject, originalMessage, replyMessage, adminName, attachments = [] }) => {
