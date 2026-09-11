@@ -71,8 +71,10 @@ const listBookings = async (req, res) => {
     const { PLANS } = require('../config/stripePlans');
     const db = readDB();
 
-    // 1. Get Supabase demo bookings if available
+    // 1. Get Supabase demo bookings, payments and subscriptions if available
     let supaBookings = [];
+    let supaPayments = [];
+    let supaSubs = [];
     if (supabase) {
       try {
         const { data, error } = await supabase
@@ -81,10 +83,20 @@ const listBookings = async (req, res) => {
           .order('created_at', { ascending: false });
         if (!error && Array.isArray(data)) supaBookings = data;
       } catch (e) {}
+      try {
+        const { data: pData } = await supabase.from('payments').select('*');
+        if (Array.isArray(pData)) supaPayments = pData;
+      } catch (e) {}
+      try {
+        const { data: sData } = await supabase.from('subscriptions').select('*');
+        if (Array.isArray(sData)) supaSubs = sData;
+      } catch (e) {}
     }
 
-    // 2. Get local db.demos
+    // 2. Get local db data
     const localBookings = db.demos || [];
+    const localPayments = db.payments || [];
+    const localSubs = db.subscriptions || [];
 
     // 3. Merge Supabase + local db.demos
     const demoMap = new Map();
@@ -96,25 +108,41 @@ const listBookings = async (req, res) => {
     });
 
     const rawList = Array.from(demoMap.values());
-    const allPayments = db.payments || [];
-    const allSubscriptions = db.subscriptions || [];
+    const allPayments = [...supaPayments, ...localPayments];
+    const allSubscriptions = [...supaSubs, ...localSubs];
 
     const formattedData = await Promise.all(
       rawList.map(async (booking) => {
         let paymentInfo = null;
 
-        // Check explicit attached payments (linked by booking_id)
-        if (booking.payments && booking.payments.length > 0) {
-          const payment = booking.payments.find((p) => p.status === 'paid') || booking.payments[0];
-          const planKey = payment.plan_key || 'basic';
+        const bookingEmail = String(booking.email || '').trim().toLowerCase();
+        const bookingIdStr = String(booking.id || '');
+
+        // 1. Check explicit attached payments (from Supabase relation)
+        let matchedPayment = null;
+        if (booking.payments && Array.isArray(booking.payments) && booking.payments.length > 0) {
+          matchedPayment = booking.payments.find((p) => p.status === 'paid') || booking.payments[0];
+        }
+
+        // 2. Fallback: Search all payments by booking_id or email
+        if (!matchedPayment) {
+          matchedPayment = allPayments.find(
+            (p) =>
+              (p.booking_id && String(p.booking_id) === bookingIdStr) ||
+              (bookingEmail && p.email && String(p.email).trim().toLowerCase() === bookingEmail)
+          );
+        }
+
+        if (matchedPayment) {
+          const planKey = matchedPayment.plan_key || 'basic';
           const planObj = PLANS[planKey] || PLANS['basic'];
 
           paymentInfo = {
-            plan: planObj?.name || 'Basic Plan',
+            plan: planObj?.name || (matchedPayment.plan_key ? `${matchedPayment.plan_key.toUpperCase()} Plan` : 'Basic Plan'),
             interval: planObj?.intervalLabel || 'quarterly',
-            amount: payment.amount || planObj?.amount || 0,
-            currency: payment.currency || 'usd',
-            status: payment.status === 'paid' ? 'paid' : 'pending'
+            amount: matchedPayment.amount || (planObj?.amount ? planObj.amount * 100 : 0),
+            currency: matchedPayment.currency || 'usd',
+            status: matchedPayment.status === 'paid' ? 'paid' : 'pending'
           };
         } else if (booking.stripe_invoice_id) {
           const planKey = booking.plan_key || 'basic';
@@ -122,10 +150,28 @@ const listBookings = async (req, res) => {
           paymentInfo = {
             plan: planObj?.name || 'Basic Plan',
             interval: planObj?.intervalLabel || 'quarterly',
-            amount: booking.amount || planObj?.amount || 0,
+            amount: booking.amount || (planObj?.amount ? planObj.amount * 100 : 0),
             currency: booking.currency || 'usd',
             status: 'paid'
           };
+        } else {
+          // 3. Fallback: Search subscriptions by email
+          const matchedSub = allSubscriptions.find(
+            (s) => bookingEmail && s.email && String(s.email).trim().toLowerCase() === bookingEmail
+          );
+          if (matchedSub) {
+            const planKey = matchedSub.plan_key || 'basic';
+            const planObj = PLANS[planKey] || PLANS['basic'];
+            paymentInfo = {
+              plan: planObj?.name || `${planKey.toUpperCase()} Plan`,
+              interval: planObj?.intervalLabel || matchedSub.plan_type || 'quarterly',
+              amount: matchedSub.amount || (planObj?.amount ? planObj.amount * 100 : 0),
+              currency: matchedSub.currency || 'usd',
+              status: matchedSub.status === 'active' || matchedSub.status === 'paid' ? 'paid' : 'pending',
+              startDate: matchedSub.start_date,
+              endDate: matchedSub.expiry_date
+            };
+          }
         }
 
         const { payments, ...rest } = booking;

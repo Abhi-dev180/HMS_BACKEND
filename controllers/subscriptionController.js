@@ -46,10 +46,17 @@ const createSubscription = async (req, res) => {
     });
 
     // Save payment intent to track
+    const { PLANS } = require('../config/stripePlans');
+    const planObj = PLANS[planKey] || PLANS['basic'];
+    const userEmail = user?.email || req.user?.email || bookingDetails?.email || null;
+
     await supabase.from('payments').insert({
       user_id: userId,
+      booking_id: bookingDetails?.id || null,
+      email: userEmail,
+      plan_key: planKey,
+      amount: planObj?.amount ? planObj.amount * 100 : 50000,
       stripe_session_id: session.id,
-      amount: 0, // Will be updated from webhook
       currency: 'usd',
       status: 'pending'
     });
