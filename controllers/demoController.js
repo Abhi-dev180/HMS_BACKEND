@@ -118,18 +118,27 @@ const listBookings = async (req, res) => {
         const bookingEmail = String(booking.email || '').trim().toLowerCase();
         const bookingIdStr = String(booking.id || '');
 
-        // 1. Check explicit attached payments (from Supabase relation)
+        // 1. Check explicit attached payments (from Supabase relation or matching booking_id)
         let matchedPayment = null;
         if (booking.payments && Array.isArray(booking.payments) && booking.payments.length > 0) {
           matchedPayment = booking.payments.find((p) => p.status === 'paid') || booking.payments[0];
         }
 
-        // 2. Fallback: Search all payments by booking_id or email
+        // 2. Fallback: Search all payments by exact booking_id
         if (!matchedPayment) {
           matchedPayment = allPayments.find(
+            (p) => p.booking_id && String(p.booking_id) === bookingIdStr
+          );
+        }
+
+        // 3. Fallback: Only for completed demos, match strictly UNASSIGNED payments (!p.booking_id) with matching email
+        if (!matchedPayment && booking.status === 'completed') {
+          matchedPayment = allPayments.find(
             (p) =>
-              (p.booking_id && String(p.booking_id) === bookingIdStr) ||
-              (bookingEmail && p.email && String(p.email).trim().toLowerCase() === bookingEmail)
+              !p.booking_id &&
+              bookingEmail &&
+              p.email &&
+              String(p.email).trim().toLowerCase() === bookingEmail
           );
         }
 
@@ -140,7 +149,7 @@ const listBookings = async (req, res) => {
           paymentInfo = {
             plan: planObj?.name || (matchedPayment.plan_key ? `${matchedPayment.plan_key.toUpperCase()} Plan` : 'Basic Plan'),
             interval: planObj?.intervalLabel || 'quarterly',
-            amount: matchedPayment.amount || (planObj?.amount ? planObj.amount * 100 : 0),
+            amount: matchedPayment.amount || (planObj?.amount ? planObj.amount : 0),
             currency: matchedPayment.currency || 'usd',
             status: matchedPayment.status === 'paid' ? 'paid' : 'pending'
           };
@@ -150,28 +159,10 @@ const listBookings = async (req, res) => {
           paymentInfo = {
             plan: planObj?.name || 'Basic Plan',
             interval: planObj?.intervalLabel || 'quarterly',
-            amount: booking.amount || (planObj?.amount ? planObj.amount * 100 : 0),
+            amount: booking.amount || (planObj?.amount ? planObj.amount : 0),
             currency: booking.currency || 'usd',
             status: 'paid'
           };
-        } else {
-          // 3. Fallback: Search subscriptions by email
-          const matchedSub = allSubscriptions.find(
-            (s) => bookingEmail && s.email && String(s.email).trim().toLowerCase() === bookingEmail
-          );
-          if (matchedSub) {
-            const planKey = matchedSub.plan_key || 'basic';
-            const planObj = PLANS[planKey] || PLANS['basic'];
-            paymentInfo = {
-              plan: planObj?.name || `${planKey.toUpperCase()} Plan`,
-              interval: planObj?.intervalLabel || matchedSub.plan_type || 'quarterly',
-              amount: matchedSub.amount || (planObj?.amount ? planObj.amount * 100 : 0),
-              currency: matchedSub.currency || 'usd',
-              status: matchedSub.status === 'active' || matchedSub.status === 'paid' ? 'paid' : 'pending',
-              startDate: matchedSub.start_date,
-              endDate: matchedSub.expiry_date
-            };
-          }
         }
 
         const { payments, ...rest } = booking;
