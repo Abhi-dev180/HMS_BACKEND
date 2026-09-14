@@ -432,13 +432,48 @@ const verifySession = async (req, res) => {
         });
       }
 
+      const customerEmail = session.customer_details?.email || session.customer_email || targetEmail;
+      const planKeyToSave = session.metadata?.plan_key || targetPlanKey || 'basic';
+      const amountToSave = session.amount_total || (PLANS[planKeyToSave]?.amount) || 20000;
+
       if (isSupabaseConfigured()) {
         try {
+          const { data: existingPay } = await supabase.from("payments").select("id, booking_id").eq("stripe_session_id", sessionId).maybeSingle();
+          let finalBookingId = existingPay?.booking_id || null;
+
+          if (!finalBookingId && customerEmail) {
+            const { data: bData } = await supabase
+              .from('demo_bookings')
+              .select('id')
+              .eq('email', customerEmail)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (bData) finalBookingId = bData.id;
+          }
+
+          const updateFields = {
+            status: "paid",
+            updated_at: new Date().toISOString()
+          };
+          if (finalBookingId) updateFields.booking_id = finalBookingId;
+          if (customerEmail) updateFields.email = customerEmail;
+          if (planKeyToSave) updateFields.plan_key = planKeyToSave;
+          if (amountToSave) updateFields.amount = amountToSave;
+          if (session.currency) updateFields.currency = session.currency;
+
           await supabase
             .from("payments")
-            .update({ status: "paid", updated_at: new Date().toISOString() })
+            .update(updateFields)
             .eq("stripe_session_id", sessionId);
-        } catch (e) {}
+
+          broadcast('payment_created', { sessionId, bookingId: finalBookingId, email: customerEmail, status: 'paid' });
+          if (finalBookingId) {
+            broadcast('demo_updated', { id: finalBookingId, payment_status: 'paid' });
+          }
+        } catch (e) {
+          console.error('[verifySession] Supabase payment update error:', e.message);
+        }
       }
 
       // Handle subscription or one-time
@@ -1109,15 +1144,45 @@ const syncSession = async (sessionId) => {
   const session = await stripeSvc.retrieveSession(sessionId);
   if (!session) throw new Error("session not found");
 
+  const customerEmail = session.customer_details?.email || session.customer_email;
+  const planKeyToSave = session.metadata?.plan_key || 'basic';
+  const amountToSave = session.amount_total || (PLANS[planKeyToSave]?.amount) || 20000;
+
   try {
+    const { data: existingPay } = await supabase.from("payments").select("id, booking_id").eq("stripe_session_id", session.id).maybeSingle();
+    let finalBookingId = existingPay?.booking_id || null;
+
+    if (!finalBookingId && customerEmail) {
+      const { data: bData } = await supabase
+        .from('demo_bookings')
+        .select('id')
+        .eq('email', customerEmail)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (bData) finalBookingId = bData.id;
+    }
+
+    const updateFields = {
+      stripe_payment_intent_id: session.payment_intent || null,
+      plan_key: planKeyToSave,
+      amount: amountToSave,
+      currency: session.currency || "usd",
+      status: "paid",
+      updated_at: new Date().toISOString(),
+    };
+    if (finalBookingId) updateFields.booking_id = finalBookingId;
+    if (customerEmail) updateFields.email = customerEmail;
+
     await supabase
       .from("payments")
-      .update({
-        stripe_payment_intent_id: session.payment_intent || null,
-        plan_key: session.metadata?.plan_key || null,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updateFields)
       .eq("stripe_session_id", session.id);
+
+    broadcast('payment_created', { sessionId: session.id, bookingId: finalBookingId, email: customerEmail, status: 'paid' });
+    if (finalBookingId) {
+      broadcast('demo_updated', { id: finalBookingId, payment_status: 'paid' });
+    }
   } catch (e) {
     /* ignore */
   }

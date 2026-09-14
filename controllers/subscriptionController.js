@@ -20,21 +20,48 @@ const createSubscription = async (req, res) => {
     const successPath = req.body.successPath || '/dashboard';
     const cancelPath = req.body.cancelPath || '/pricing';
 
-    // Fetch latest demo booking for the user
+    // Fetch associated demo booking from feedbackToken, booking payload, or user email
     let bookingDetails = null;
-    const { data: user } = await supabase.from('users').select('email').eq('id', userId).single();
-    if (user && user.email) {
-      const { data: latestBooking } = await supabase
-        .from('demo_bookings')
-        .select('*')
-        .eq('email', user.email)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (latestBooking) {
-        bookingDetails = latestBooking;
-      }
+    const feedbackToken = req.body.feedbackToken;
+    const reqBooking = req.body.booking;
+
+    if (feedbackToken && supabase) {
+      try {
+        const { data: bData } = await supabase
+          .from('demo_bookings')
+          .select('*')
+          .eq('feedback_token', feedbackToken)
+          .maybeSingle();
+        if (bData) bookingDetails = bData;
+      } catch (_) {}
     }
+
+    if (!bookingDetails && reqBooking?.id && reqBooking.id !== 'demo-booking' && supabase) {
+      try {
+        const { data: bData } = await supabase
+          .from('demo_bookings')
+          .select('*')
+          .eq('id', reqBooking.id)
+          .maybeSingle();
+        if (bData) bookingDetails = bData;
+      } catch (_) {}
+    }
+
+    if (!bookingDetails && (reqBooking?.email || req.user?.email) && supabase) {
+      try {
+        const emailToLookup = reqBooking?.email || req.user?.email;
+        const { data: bData } = await supabase
+          .from('demo_bookings')
+          .select('*')
+          .eq('email', emailToLookup)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (bData) bookingDetails = bData;
+      } catch (_) {}
+    }
+
+    const { data: user } = await supabase.from('users').select('email').eq('id', userId).maybeSingle();
 
     const session = await stripeSvc.createSubscriptionCheckout({
       userId,
@@ -42,20 +69,20 @@ const createSubscription = async (req, res) => {
       planKey,
       successPath,
       cancelPath,
-      booking: bookingDetails
+      booking: bookingDetails || reqBooking || null
     });
 
     // Save payment intent to track
     const { PLANS } = require('../config/stripePlans');
     const planObj = PLANS[planKey] || PLANS['basic'];
-    const userEmail = user?.email || req.user?.email || bookingDetails?.email || null;
+    const userEmail = bookingDetails?.email || reqBooking?.email || user?.email || req.user?.email || null;
 
     await supabase.from('payments').insert({
       user_id: userId,
       booking_id: bookingDetails?.id || null,
       email: userEmail,
       plan_key: planKey,
-      amount: planObj?.amount ? planObj.amount * 100 : 50000,
+      amount: planObj?.amount ? planObj.amount : 20000,
       stripe_session_id: session.id,
       currency: 'usd',
       status: 'pending'
