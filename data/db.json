@@ -3,6 +3,41 @@
   "hospitals": [],
   "appointments": [
     {
+      "id": "1789436495160",
+      "userId": null,
+      "hospitalId": "",
+      "hospital": "ABC",
+      "doctorName": "Lab: Doctor Consultation",
+      "date": "2026-09-15",
+      "time": "09:00",
+      "patientName": "John Doe",
+      "patientPhone": "",
+      "email": "user@yopmail.com",
+      "reason": "Diagnostic Test: Doctor Consultation",
+      "petName": "",
+      "species": "",
+      "sex": "",
+      "breed": "",
+      "appointmentType": "Lab Test",
+      "serviceId": null,
+      "serviceName": "Doctor Consultation",
+      "serviceCategory": null,
+      "servicePrice": 500,
+      "sampleType": null,
+      "fastingRequired": false,
+      "fastingDetails": "",
+      "turnaroundTime": "",
+      "status": "Pending",
+      "paymentStatus": "Paid",
+      "paymentId": "pi_3UFlNcLQib8WIljJ0H60AHFi",
+      "paymentAmount": 500,
+      "paymentMethod": "Stripe Card",
+      "appointment_number": 4849,
+      "createdAt": "2026-09-15T01:41:35.160Z",
+      "stripe_session_id": "cs_test_a1g2INn7CAaaXd8WdLKgseEsaNxSUMa4UpOvCiVDUd8Cr8RZIPpOIvZgFt",
+      "updatedAt": "2026-09-15T01:42:00.706Z"
+    },
+    {
       "id": "1789375054865",
       "userId": null,
       "hospitalId": "1786342149354",
@@ -716,6 +751,20 @@
     }
   ],
   "contacts": [
+    {
+      "id": "gmail_1a09f5ca71926a0d",
+      "supa_id": "ef49a229-73b9-4101-a2eb-b1f0c0a3e709",
+      "name": "Cal.com",
+      "email": "hello@cal.com",
+      "subject": "Reminder: Demo-Booking between Raj Dev and Quo anim autem sit  - Mon, Sep 14, 2026 4:30pm",
+      "phone": "",
+      "message": "Hi Quo anim autem sit , This is a reminder about your upcoming event. Event: Demo-Booking between Raj Dev and Quo anim autem sit Date &amp; time: Mon, Sep 14, 2026 4:30pm - 5:00pm (Asia/Calcutta)",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-14T10:00:39.000Z",
+      "updated_at": "2026-09-14T10:01:02.896Z"
+    },
     {
       "id": "gmail_1a09f15ddf35852e",
       "supa_id": "aec63414-84e8-427d-b9ce-9822c10301dc",
@@ -1935,26 +1984,6 @@
       "imageUrl": "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=600&auto=format&fit=crop&q=80",
       "createdAt": "2026-09-02T08:52:13.409Z",
       "updatedAt": "2026-09-02T08:52:13.409Z"
-    }
-  ],
-  "registrations": [
-    {
-      "id": "8fb4bda9-51b3-495f-b334-24bd4ccb1219",
-      "booking_id": "1b27ae8a-0ef7-4cc2-bb61-e46ca1221799",
-      "username": "rajdevfree@gmail.com",
-      "hospital_name": "ABC",
-      "contact_name": "ABCD",
-      "email": "rajdevfree@gmail.com",
-      "phone": "1234567890",
-      "city": "Bemidji",
-      "address": "2025 Paul Bunyan Drive Northwest",
-      "beds": null,
-      "details": {
-        "password": "Abcd@12345"
-      },
-      "status": "pending",
-      "created_at": "2026-09-14T08:48:46.415Z",
-      "updated_at": "2026-09-14T08:48:46.415Z"
     }
   ]
 }
