@@ -27,7 +27,7 @@
       "fastingRequired": false,
       "fastingDetails": "",
       "turnaroundTime": "",
-      "status": "Pending",
+      "status": "Cancelled",
       "paymentStatus": "Paid",
       "paymentId": "pi_3UFlNcLQib8WIljJ0H60AHFi",
       "paymentAmount": 500,
@@ -35,7 +35,14 @@
       "appointment_number": 4849,
       "createdAt": "2026-09-15T01:41:35.160Z",
       "stripe_session_id": "cs_test_a1g2INn7CAaaXd8WdLKgseEsaNxSUMa4UpOvCiVDUd8Cr8RZIPpOIvZgFt",
-      "updatedAt": "2026-09-15T01:42:00.706Z"
+      "updatedAt": "2026-09-15T01:47:35.488Z",
+      "cancellationReason": "Emergency / personal conflict",
+      "cancellationFee": 50,
+      "refundAmount": 450,
+      "refundStatus": "Refunded",
+      "refundId": "re_3UFlNcLQib8WIljJ0o0nrvqp",
+      "cancelledAt": "2026-09-15T01:47:35.488Z",
+      "google_event_id": null
     },
     {
       "id": "1789375054865",

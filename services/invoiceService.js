@@ -511,4 +511,298 @@ const generateAppointmentInvoice = (data) => {
   });
 };
 
-module.exports = { generateInvoice, generateAppointmentInvoice };
+/**
+ * Generates a beautifully styled PDF cancellation invoice & credit memo as a buffer.
+ * Supports both Diagnostic Lab Tests and Doctor Consultations.
+ * @param {Object} data - Appointment cancellation data
+ * @returns {Promise<Buffer>}
+ */
+const generateCancellationInvoice = (data) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const buffers = [];
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfData = Buffer.concat(buffers);
+        resolve(pdfData);
+      });
+
+      const isLab = data.appointmentType === 'Lab Test' || Boolean(data.serviceName);
+      const isPaid = String(data.paymentStatus || '').toLowerCase() === 'paid' || Number(data.refundAmount) > 0;
+      const originalAmount = Number(data.paymentAmount || data.servicePrice || 0);
+      const cancelFee = Number(data.cancellationFee || 0);
+      const refundAmt = Number(data.refundAmount || 0);
+      const cancelDate = data.cancelledAt ? new Date(data.cancelledAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+
+      // Colors - Rose/Crimson Theme for Cancellation Credit Memo
+      const primaryColor = '#991b1b';     // Deep Crimson / Red-800
+      const lightBg = '#fef2f2';          // Red-50
+      const darkGray = '#475569';
+      const borderColor = '#fecaca';      // Red-200
+
+      // ─── Header Banner ──────────────────────────────────────────
+      doc.rect(0, 0, doc.page.width, 105).fill(primaryColor);
+
+      doc.fillColor('#ffffff')
+         .fontSize(20)
+         .font('Helvetica-Bold')
+         .text('CANCELLATION INVOICE & CREDIT MEMO', 40, 26, { align: 'left' });
+
+      doc.fillColor('#fecaca')
+         .fontSize(10)
+         .font('Helvetica')
+         .text(
+           isLab
+             ? 'Cancelled Laboratory Diagnostic Test Booking • Refund Credit Voucher'
+             : 'Cancelled Outpatient Doctor Consultation • Refund Credit Voucher',
+           40,
+           52
+         );
+
+      // Provider details (Right aligned)
+      doc.fillColor('#ffffff')
+         .fontSize(10)
+         .font('Helvetica-Bold')
+         .text(data.hospital || 'MEDPARK Hospital & Diagnostic Center', 300, 24, { align: 'right' });
+
+      doc.font('Helvetica')
+         .fontSize(9)
+         .fillColor('#fecaca')
+         .text('MEDPARK Health Network', 300, 39, { align: 'right' })
+         .text('24x7 Helpline: +91 9814538354 | billing@medpark.com', 300, 52, { align: 'right' })
+         .text(`Hospital Center: ${data.hospital || 'Main Center'}`, 300, 65, { align: 'right' });
+
+      // ─── Top Boxes: PATIENT INFO (Left) & CANCELLATION META (Right) ─────────
+      const startY = 120;
+      const boxHeight = 110;
+
+      // Left Box: Patient & Pet Info
+      doc.rect(40, startY, 250, boxHeight)
+         .lineWidth(1)
+         .strokeColor(borderColor)
+         .fillAndStroke(lightBg, borderColor);
+
+      doc.fillColor(primaryColor)
+         .fontSize(10)
+         .font('Helvetica-Bold')
+         .text('PATIENT & RECIPIENT DETAILS', 52, startY + 10);
+
+      doc.fillColor('#0f172a')
+         .fontSize(12)
+         .font('Helvetica-Bold')
+         .text(data.patientName || 'Patient', 52, startY + 26);
+
+      doc.font('Helvetica')
+         .fontSize(9)
+         .fillColor(darkGray)
+         .text(`Phone: ${data.patientPhone || 'N/A'}`, 52, startY + 44)
+         .text(`Email: ${data.email || 'N/A'}`, 52, startY + 58)
+         .text(`Pet Name: ${data.petName || 'Not specified'}`, 52, startY + 72)
+         .text(`Species / Breed: ${[data.species, data.breed, data.sex].filter(Boolean).join(' • ') || 'Pet Animal'}`, 52, startY + 86);
+
+      // Right Box: Cancellation Meta Info
+      doc.rect(305, startY, 250, boxHeight)
+         .lineWidth(1)
+         .strokeColor(borderColor)
+         .fillAndStroke(lightBg, borderColor);
+
+      doc.fillColor(primaryColor)
+         .fontSize(10)
+         .font('Helvetica-Bold')
+         .text('CANCELLATION & SETTLEMENT INFO', 317, startY + 10);
+
+      const metaXLabel = 317;
+      const metaXVal = 425;
+
+      const metaRows = [
+        ['Credit Note #:', `CN-${data.appointment_number || data.id || '1001'}`],
+        ['Original Order #:', `#${data.appointment_number || data.id || '1001'}`],
+        ['Cancel Date:', cancelDate],
+        ['Payment Method:', data.paymentMethod || 'Online Gateway'],
+        ['Refund Status:', isPaid && refundAmt > 0 ? (data.refundStatus || 'REFUNDED') : 'NO REFUND']
+      ];
+
+      metaRows.forEach(([label, val], idx) => {
+        const rowY = startY + 26 + (idx * 15);
+        doc.font('Helvetica')
+           .fontSize(9)
+           .fillColor(darkGray)
+           .text(label, metaXLabel, rowY);
+
+        doc.font('Helvetica-Bold')
+           .fontSize(9)
+           .fillColor(label === 'Refund Status:' ? (isPaid && refundAmt > 0 ? '#15803d' : '#64748b') : '#0f172a')
+           .text(val, metaXVal, rowY, { width: 125, align: 'right' });
+      });
+
+      // ─── Middle Section: Cancellation Reason & Booking Reference ──────
+      const specY = startY + boxHeight + 12;
+      doc.rect(40, specY, 515, 60)
+         .fillAndStroke('#fff1f2', '#ffe4e6');
+
+      doc.fillColor(primaryColor)
+         .fontSize(9)
+         .font('Helvetica-Bold')
+         .text('CANCELLED BOOKING SPECIFICATIONS', 52, specY + 8);
+
+      if (isLab) {
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Test Name:', 52, specY + 23);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.serviceName || data.reason || 'Diagnostic Lab Investigation', 120, specY + 23);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Original Slot:', 52, specY + 36);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(`${data.date} at ${data.time}`, 120, specY + 36);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Cancel Reason:', 300, specY + 23);
+        doc.font('Helvetica').fontSize(9).fillColor('#b91c1c').text(data.cancellationReason || 'Cancelled by user', 380, specY + 23);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Refund ID:', 300, specY + 36);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.refundId ? String(data.refundId).slice(0, 18) : 'N/A', 380, specY + 36);
+      } else {
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Consultation:', 52, specY + 23);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.doctorName ? `Dr. ${data.doctorName}` : (data.reason || 'Doctor Consultation'), 140, specY + 23);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Original Slot:', 52, specY + 36);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(`${data.date} at ${data.time}`, 140, specY + 36);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Cancel Reason:', 300, specY + 23);
+        doc.font('Helvetica').fontSize(9).fillColor('#b91c1c').text(data.cancellationReason || 'Cancelled by user', 380, specY + 23);
+
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#1e293b').text('Refund ID:', 300, specY + 36);
+        doc.font('Helvetica').fontSize(9).fillColor('#0f172a').text(data.refundId ? String(data.refundId).slice(0, 18) : 'N/A', 380, specY + 36);
+      }
+
+      // ─── Table Header ──────────────────────────────────────────────
+      const tableY = specY + 70;
+      doc.rect(40, tableY, 515, 24).fill(primaryColor);
+
+      doc.fillColor('#ffffff')
+         .fontSize(9)
+         .font('Helvetica-Bold')
+         .text('Description / Line Item', 52, tableY + 7, { width: 280 })
+         .text('Adjustment', 340, tableY + 7, { width: 90 })
+         .text('Amount (INR)', 445, tableY + 7, { align: 'right', width: 100 });
+
+      // ─── Table Rows (Financial Breakdown) ──────────────────────────
+      const row1Y = tableY + 24;
+      doc.rect(40, row1Y, 515, 28)
+         .lineWidth(1)
+         .strokeColor(borderColor)
+         .fillAndStroke('#ffffff', borderColor);
+
+      doc.fillColor('#0f172a')
+         .fontSize(9)
+         .font('Helvetica-Bold')
+         .text(`Original Booking Fee: ${isLab ? (data.serviceName || 'Lab Test') : (data.reason || 'Doctor Consultation')}`, 52, row1Y + 8, { width: 280 });
+
+      doc.font('Helvetica')
+         .fontSize(9)
+         .fillColor('#0f172a')
+         .text('Gross Amount', 340, row1Y + 8, { width: 90 });
+
+      doc.font('Helvetica-Bold')
+         .fontSize(9.5)
+         .fillColor('#0f172a')
+         .text(`INR ${originalAmount.toFixed(2)}`, 445, row1Y + 8, { align: 'right', width: 100 });
+
+      const row2Y = row1Y + 28;
+      doc.rect(40, row2Y, 515, 28)
+         .lineWidth(1)
+         .strokeColor(borderColor)
+         .fillAndStroke('#fff5f5', borderColor);
+
+      doc.fillColor('#b91c1c')
+         .fontSize(9)
+         .font('Helvetica-Bold')
+         .text('Less: Standard Cancellation Processing Fee (10%)', 52, row2Y + 8, { width: 280 });
+
+      doc.font('Helvetica')
+         .fontSize(9)
+         .fillColor('#b91c1c')
+         .text('Deduction', 340, row2Y + 8, { width: 90 });
+
+      doc.font('Helvetica-Bold')
+         .fontSize(9.5)
+         .fillColor('#b91c1c')
+         .text(`- INR ${cancelFee.toFixed(2)}`, 445, row2Y + 8, { align: 'right', width: 100 });
+
+      // ─── Total Box & Status Badge ──────────────────────────────────
+      const totalY = row2Y + 38;
+
+      // Status Stamp on Left
+      doc.rect(40, totalY, 200, 48)
+         .lineWidth(1.5)
+         .strokeColor(isPaid && refundAmt > 0 ? '#16a34a' : '#64748b')
+         .fillAndStroke(isPaid && refundAmt > 0 ? '#f0fdf4' : '#f8fafc', isPaid && refundAmt > 0 ? '#86efac' : '#cbd5e1');
+
+      doc.font('Helvetica-Bold')
+         .fontSize(11)
+         .fillColor(isPaid && refundAmt > 0 ? '#15803d' : '#475569')
+         .text(isPaid && refundAmt > 0 ? 'REFUND INITIATED' : 'CANCELLED (UNPAID)', 52, totalY + 11);
+
+      doc.font('Helvetica')
+         .fontSize(8)
+         .fillColor(darkGray)
+         .text(isPaid && refundAmt > 0 ? `Credit via ${data.paymentMethod || 'Original Gateway'}` : 'Booking released without charges', 52, totalY + 28);
+
+      // Net Refund Credit Box on Right
+      doc.rect(345, totalY, 210, 48)
+         .fill(primaryColor);
+
+      doc.fillColor('#fecaca')
+         .fontSize(9)
+         .font('Helvetica-Bold')
+         .text('NET REFUND CREDIT AMOUNT', 357, totalY + 8);
+
+      doc.fillColor('#ffffff')
+         .fontSize(16)
+         .font('Helvetica-Bold')
+         .text(`INR ${refundAmt.toFixed(2)}`, 357, totalY + 23, { align: 'right', width: 185 });
+
+      // ─── Refund Policy & Settlement Notes ─────────────────────────
+      const notesY = totalY + 58;
+      doc.rect(40, notesY, 515, 60)
+         .fillAndStroke('#f8fafc', '#e2e8f0');
+
+      doc.fillColor(primaryColor)
+         .fontSize(8.5)
+         .font('Helvetica-Bold')
+         .text('REFUND POLICY & SETTLEMENT TERMS:', 52, notesY + 7);
+
+      doc.font('Helvetica')
+         .fontSize(8)
+         .fillColor(darkGray)
+         .text(
+           isPaid && refundAmt > 0
+             ? `1. The net refund of INR ${refundAmt.toFixed(2)} has been submitted to your original payment source.\n2. Please allow 5-7 banking business days for the credit to appear on your bank statement or card.\n3. For any billing questions regarding this credit memo, please quote reference #${data.appointment_number} to support@medpark.com.`
+             : `1. This appointment was cancelled with zero payment dues or pending balances.\n2. No financial charge was retained, and your booking slot has been released back to the hospital.\n3. You may re-book a fresh consultation or diagnostic test anytime on MEDPARK.`,
+           52,
+           notesY + 19,
+           { width: 495, lineGap: 2 }
+         );
+
+      // ─── Footer ────────────────────────────────────────────────────
+      doc.strokeColor('#e2e8f0')
+         .lineWidth(1)
+         .moveTo(40, doc.page.height - 45)
+         .lineTo(doc.page.width - 40, doc.page.height - 45)
+         .stroke();
+
+      doc.fillColor('#94a3b8')
+         .fontSize(8)
+         .font('Helvetica')
+         .text(
+           'This is an official cancellation credit note & tax receipt from MEDPARK Hospital Management System. Generated electronically.',
+           40,
+           doc.page.height - 35,
+           { align: 'center', width: doc.page.width - 80 }
+         );
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
+
+module.exports = { generateInvoice, generateAppointmentInvoice, generateCancellationInvoice };

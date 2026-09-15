@@ -12,7 +12,7 @@ const {
   sendAppointmentCancelled,
   sendAppointmentFeedbackInvitation
 } = require('../services/emailService');
-const { generateAppointmentInvoice } = require('../services/invoiceService');
+const { generateAppointmentInvoice, generateCancellationInvoice } = require('../services/invoiceService');
 const {
   getBookedSlotsForDate,
   createCalendarEvent,
@@ -139,12 +139,21 @@ const executeAppointmentCancellation = async ({ appointment, reason = '', cancel
     updatedAppointment = { ...appointment, ...patch };
   }
 
+  // Generate cancellation invoice PDF
+  let cancellationPdfBuffer = null;
+  try {
+    cancellationPdfBuffer = await generateCancellationInvoice(updatedAppointment);
+  } catch (pdfErr) {
+    console.error('[appointments] Failed to generate cancellation invoice PDF:', pdfErr);
+  }
+
   // Send cancellation and refund receipt email
   const userEmail = await getUserEmail(updatedAppointment);
   if (userEmail) {
     sendAppointmentCancelled({
       to: userEmail,
       appointment: updatedAppointment,
+      invoicePdfBuffer: cancellationPdfBuffer,
       patientName: updatedAppointment.patientName,
       hospitalName: updatedAppointment.hospital,
       date: updatedAppointment.date,
@@ -1368,6 +1377,74 @@ const reschedulePublicAppointment = async (req, res) => {
   });
 };
 
+// ─── GET /api/appointments/:id/invoice ───────────────────────
+const downloadAppointmentInvoice = async (req, res) => {
+  const { id } = req.params;
+  try {
+    let appointment = null;
+    if (supabase) {
+      try {
+        const isNum = !isNaN(id) && String(id).trim() !== '';
+        const { data } = await supabase
+          .from(T)
+          .select('*')
+          .or(`id.eq.${id}${isNum ? `,appointment_number.eq.${Number(id)}` : ''}`)
+          .maybeSingle();
+        if (data) appointment = data;
+      } catch (_) {}
+    }
+    if (!appointment) {
+      const db = readDB();
+      appointment = (db.appointments || []).find((a) => String(a.id) === String(id) || String(a.appointment_number) === String(id));
+    }
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    const pdfBuffer = await generateAppointmentInvoice(appointment);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice_${appointment.appointment_number || appointment.id}.pdf"`);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error('[appointments] download invoice error:', err);
+    return res.status(500).json({ message: 'Could not generate invoice PDF' });
+  }
+};
+
+// ─── GET /api/appointments/:id/cancellation-invoice ──────────
+const downloadCancellationInvoice = async (req, res) => {
+  const { id } = req.params;
+  try {
+    let appointment = null;
+    if (supabase) {
+      try {
+        const isNum = !isNaN(id) && String(id).trim() !== '';
+        const { data } = await supabase
+          .from(T)
+          .select('*')
+          .or(`id.eq.${id}${isNum ? `,appointment_number.eq.${Number(id)}` : ''}`)
+          .maybeSingle();
+        if (data) appointment = data;
+      } catch (_) {}
+    }
+    if (!appointment) {
+      const db = readDB();
+      appointment = (db.appointments || []).find((a) => String(a.id) === String(id) || String(a.appointment_number) === String(id));
+    }
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    const pdfBuffer = await generateCancellationInvoice(appointment);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="cancellation_invoice_${appointment.appointment_number || appointment.id}.pdf"`);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error('[appointments] download cancellation invoice error:', err);
+    return res.status(500).json({ message: 'Could not generate cancellation invoice PDF' });
+  }
+};
+
 // ─── Exports ──────────────────────────────────────────────────
 module.exports = {
   bookAppointment,
@@ -1382,5 +1459,7 @@ module.exports = {
   getBookedSlots,
   lookupAppointments,
   reschedulePublicAppointment,
-  getAppointmentByNumber
+  getAppointmentByNumber,
+  downloadAppointmentInvoice,
+  downloadCancellationInvoice
 };

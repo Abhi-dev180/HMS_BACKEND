@@ -986,6 +986,12 @@ const appointmentCancelled = ({
           ['Status', 'Cancelled']
         ].filter(Boolean))}
 
+        <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 10px; padding: 12px 16px; margin: 18px 0;">
+          <p style="margin: 0; font-size: 13px; color: #334155; font-weight: 600;">
+            📄 <strong>Official Cancellation Invoice Attached:</strong> Your PDF Cancellation Invoice & Credit Memo (<code>cancellation_invoice_${appointmentNumber || 'receipt'}.pdf</code>) is attached to this email.
+          </p>
+        </div>
+
         ${isPaid && netRefundNum > 0 ? `
           <h3 style="color: #1e3a8a; margin-top: 24px; margin-bottom: 8px; font-size: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
             💳 Refund & Financial Breakdown

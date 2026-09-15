@@ -12,7 +12,9 @@ const {
   getBookedSlots,
   lookupAppointments,
   reschedulePublicAppointment,
-  getAppointmentByNumber   // NEW
+  getAppointmentByNumber,
+  downloadAppointmentInvoice,
+  downloadCancellationInvoice
 } = require('../controllers/appointmentController');
 
 const { cancelPublicAppointment } = require('../controllers/cancelAppointmentController');
@@ -22,7 +24,9 @@ console.log('✅ appointmentRoutes loaded and router created.');
 // ─── Public routes ───────────────────────────────────────────
 router.get('/booked-slots', getBookedSlots);
 router.post('/public', bookPublicAppointment);
-router.get('/by-number/:number', getAppointmentByNumber);   // NEW
+router.get('/by-number/:number', getAppointmentByNumber);
+router.get('/:id/invoice', downloadAppointmentInvoice);
+router.get('/:id/cancellation-invoice', downloadCancellationInvoice);
 
 // Public "manage my booking" — ownership proven by mobile + email in the body
 router.post('/lookup', lookupAppointments);

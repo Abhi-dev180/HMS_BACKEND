@@ -5,6 +5,7 @@ const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
 const templates = require('../email_template');
+const { generateCancellationInvoice } = require('./invoiceService');
 
 // ─── Environment variables ────────────────────────────────────
 const GMAIL_USER = process.env.GMAIL_USER;
@@ -404,9 +405,31 @@ const sendAppointmentPaymentFailedEmail = ({ to, appointment, reason }) => {
 
 const sendAppointmentStatusUpdate = ({ to, ...vars }) => send({ to, ...templates.appointmentStatusUpdate(vars) });
 const sendAppointmentRescheduled = ({ to, ...vars }) => send({ to, ...templates.appointmentRescheduled(vars) });
-const sendAppointmentCancelled = ({ to, ...vars }) => {
+const sendAppointmentCancelled = async ({ to, invoicePdfBuffer, ...vars }) => {
   const payload = vars.appointment ? { ...vars.appointment, ...vars } : vars;
-  return send({ to, ...templates.appointmentCancelled(payload) });
+  const mailOptions = { to, ...templates.appointmentCancelled(payload) };
+
+  let pdfBuffer = invoicePdfBuffer || payload.invoicePdfBuffer;
+  if (!pdfBuffer) {
+    try {
+      pdfBuffer = await generateCancellationInvoice(payload);
+    } catch (err) {
+      console.error('[email] Error auto-generating cancellation PDF invoice:', err);
+    }
+  }
+
+  if (pdfBuffer) {
+    const apptNum = payload.appointment_number || payload.appointmentNumber || 'receipt';
+    mailOptions.attachments = [
+      {
+        filename: `cancellation_invoice_${apptNum}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+      }
+    ];
+  }
+
+  return send(mailOptions);
 };
 const sendContactReceived = ({ to, ...vars }) => send({ to, ...templates.contactReceived(vars) });
 const sendContactStatusUpdate = ({ to, ...vars }) => send({ to, ...templates.contactStatusUpdate(vars) });
