@@ -606,17 +606,24 @@ const getHospitalList = async () => {
     try {
       const { data, error } = await supabase
         .from('hospitals')
-        .select('id, name, city, address, phone, beds, emergency')
-        .limit(10);
+        .select('*')
+        .limit(20);
       if (!error && Array.isArray(data) && data.length > 0) return data;
     } catch (_) {}
   }
 
   const db = readDB();
-  return db.hospitals || [
-    { id: '1', name: 'Apollo Multi-Specialty Hospital', city: 'Mumbai', beds: 450, emergency: '24/7 Active', phone: '+91-22-2847-0000' },
-    { id: '2', name: 'Fortis Memorial Health Institute', city: 'Delhi NCR', beds: 380, emergency: '24/7 Active', phone: '+91-11-4713-5000' },
-    { id: '3', name: 'Manipal Hospital & Research Centre', city: 'Bangalore', beds: 500, emergency: '24/7 Active', phone: '+91-80-2502-4444' }
+  if (db.hospitals && db.hospitals.length > 0) return db.hospitals;
+
+  return [
+    { id: '1', name: 'Apollo Multi-Specialty Hospital', city: 'Mumbai', location: 'Navi Mumbai, Maharashtra', beds: '450 Beds', emergency: '24/7 Active', phone: '+91-22-2847-0000', icu: '60 ICU Beds', specialty: 'Super Specialty Care' },
+    { id: '2', name: 'Fortis Memorial Health Institute', city: 'Delhi NCR', location: 'Sector 44, Gurugram, Delhi NCR', beds: '380 Beds', emergency: '24/7 Active', phone: '+91-11-4713-5000', icu: '45 ICU Beds', specialty: 'Cardiology & Neuro' },
+    { id: '3', name: 'Manipal Hospital & Research Centre', city: 'Bangalore', location: 'HAL Old Airport Rd, Bangalore', beds: '500 Beds', emergency: '24/7 Active', phone: '+91-80-2502-4444', icu: '75 ICU Beds', specialty: 'Comprehensive Care' },
+    { id: '4', name: 'Max Super Speciality Hospital', city: 'New Delhi', location: 'Saket, New Delhi', beds: '530 Beds', emergency: '24/7 Active', phone: '+91-11-2651-5050', icu: '80 ICU Beds', specialty: 'Advanced Oncology & Heart' },
+    { id: '5', name: 'Medanta - The Medicity', city: 'Gurugram', location: 'Sector 38, Gurugram, Haryana', beds: '1250 Beds', emergency: '24/7 Active', phone: '+91-124-4141414', icu: '300 ICU Beds', specialty: 'Multi-Super Specialty' },
+    { id: '6', name: 'Narayana Multispeciality Hospital', city: 'Kolkata', location: 'Chunavati, Howrah, Kolkata', beds: '320 Beds', emergency: '24/7 Active', phone: '+91-33-7122-2222', icu: '40 ICU Beds', specialty: 'Cardiac & General' },
+    { id: '7', name: 'Kokilaben Dhirubhai Ambani Hospital', city: 'Mumbai', location: 'Andheri West, Mumbai', beds: '750 Beds', emergency: '24/7 Active', phone: '+91-22-4269-6969', icu: '180 ICU Beds', specialty: 'Quaternary Care' },
+    { id: '8', name: 'KIMS Hospitals & Heart Centre', city: 'Hyderabad', location: 'Minister Rd, Secunderabad', beds: '1000 Beds', emergency: '24/7 Active', phone: '+91-40-4488-5000', icu: '200 ICU Beds', specialty: 'Transplant & Trauma' }
   ];
 };
 
@@ -720,9 +727,11 @@ const processChatMessage = async (req, res) => {
 
         return res.json({
           reply: `🩺 **Department Selected:** **${detected}**\n\n` +
-            `🏥 **Step 2 of 4: Please select your preferred hospital or clinic:**`,
+            `🏥 **Step 2 of 4: Please select your preferred hospital or clinic:**\n` +
+            `Choose a hospital from the list below or click **"See More Hospitals"** to view all options:`,
           intent: 'booking_step_hospital',
-          quickReplies: [...topHosp, 'All Accredited Hospitals', '⬅️ Back', '❌ Cancel Booking'],
+          hospitals: hospitals,
+          quickReplies: [...topHosp, 'View More Hospitals 🏥', '⬅️ Back', '❌ Cancel Booking'],
           context: {
             bookingState: {
               ...bookingState,
@@ -748,7 +757,23 @@ const processChatMessage = async (req, res) => {
         }
 
         const hospitals = await getHospitalList();
-        let selectedHospital = hospitals.find(h => lower.includes(h.name.toLowerCase()) || lower.includes(h.city.toLowerCase()));
+
+        // If user explicitly asks to see more or all hospitals
+        if (lower.includes('more') || lower.includes('all') || lower.includes('see more') || lower.includes('view more')) {
+          const hospMarkdown = hospitals.map((h, i) => `* **${i + 1}. 🏥 ${h.name}**\n  📍 *${h.location || h.city || 'Metro City'}* | 🛏️ ${h.beds || '300+'} | 🚨 ${h.emergency || '24/7'}`).join('\n\n');
+
+          return res.json({
+            reply: `🏥 **All Accredited Network Hospitals & Clinics:**\n\n${hospMarkdown}\n\n👉 *Select any hospital below to choose your date & time slot:*`,
+            intent: 'booking_step_hospital',
+            hospitals: hospitals,
+            quickReplies: [...hospitals.map(h => h.name), '⬅️ Back', '❌ Cancel Booking'],
+            context: {
+              bookingState
+            }
+          });
+        }
+
+        let selectedHospital = hospitals.find(h => lower.includes(h.name.toLowerCase()) || (h.city && lower.includes(h.city.toLowerCase())));
         if (!selectedHospital && hospitals.length > 0) {
           selectedHospital = hospitals[0];
         }
@@ -1332,9 +1357,11 @@ const processChatMessage = async (req, res) => {
 
         return res.json({
           reply: `🩺 **Specialty Selected:** **${detectedSpec}**\n\n` +
-            `🏥 **Step 2 of 4: Please choose your preferred hospital or medical centre:**`,
+            `🏥 **Step 2 of 4: Please choose your preferred hospital or clinic:**\n` +
+            `Select a hospital from the options below or click **"See More Hospitals"** to view all network branches:`,
           intent: 'booking_step_hospital',
-          quickReplies: [...topHosp, 'All Accredited Hospitals', '❌ Cancel Booking'],
+          hospitals: hospitals,
+          quickReplies: [...topHosp, 'View More Hospitals 🏥', '⬅️ Back', '❌ Cancel Booking'],
           context: {
             bookingState: {
               step: 'hospital',
