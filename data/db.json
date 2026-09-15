@@ -3,6 +3,28 @@
   "hospitals": [],
   "appointments": [
     {
+      "id": "1789461829693",
+      "userId": "1788167124361",
+      "hospitalId": "1",
+      "hospital": "MEDPARK Multi-Specialty Hospital",
+      "doctorName": "Gynecology & Obstetrics Specialist",
+      "date": "2026-09-16",
+      "time": "10:00",
+      "patientName": "John Doe",
+      "patientPhone": "9876543210",
+      "email": "user@yopmail.com",
+      "reason": "In-Chat Booking: Gynecology & Obstetrics Consultation",
+      "appointmentType": "Consult",
+      "status": "Confirmed",
+      "source": "chat_bot",
+      "paymentStatus": "Paid",
+      "paymentId": "ST_CARD_1789461828622_4242",
+      "paymentAmount": 600,
+      "paymentMethod": "Stripe Card (•••• 4242)",
+      "appointment_number": 9299,
+      "createdAt": "2026-09-15T08:43:49.693Z"
+    },
+    {
       "id": "1789461619408",
       "userId": null,
       "hospitalId": "1",
