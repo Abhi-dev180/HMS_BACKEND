@@ -51,9 +51,16 @@ const getGoogleAccessToken = async () => {
   }
   return null;
 };
+const isCancelledStatus = (st) => {
+  if (!st) return false;
+  const s = String(st).trim().toLowerCase();
+  return s === 'cancelled' || s === 'rejected' || s === 'refunded' || s.includes('cancel') || s.includes('reject');
+};
+
 /**
  * Fetch booked time slots for a specific date and hospital.
  * Queries Google Calendar API (via OAuth2 or API Key) and merges with Supabase and db.json appointments.
+ * Cancelled / rejected / refunded appointments are automatically excluded to free their slots.
  */
 const getBookedSlotsForDate = async (dateStr, hospitalId) => {
   const bookedSlots = new Set();
@@ -68,7 +75,7 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
       const { data, error } = await query;
       if (!error && Array.isArray(data)) {
         data.forEach((appt) => {
-          if (appt.status !== 'Cancelled' && appt.time) {
+          if (!isCancelledStatus(appt.status) && appt.time) {
             bookedSlots.add(formatTimeString(appt.time));
           }
         });
@@ -86,7 +93,7 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
         if (
           appt.date === dateStr &&
           (!hospitalId || String(appt.hospitalId) === String(hospitalId)) &&
-          appt.status !== 'Cancelled' &&
+          !isCancelledStatus(appt.status) &&
           appt.time
         ) {
           bookedSlots.add(formatTimeString(appt.time));
@@ -122,6 +129,7 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
         const calData = await res.json();
         if (calData.items && Array.isArray(calData.items)) {
           calData.items.forEach((event) => {
+            if (event.status === 'cancelled') return; // Exclude cancelled calendar events
             if (event.start && event.start.dateTime) {
               try {
                 const eventDate = new Date(event.start.dateTime);

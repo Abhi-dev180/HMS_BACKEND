@@ -80,8 +80,8 @@ const executeAppointmentCancellation = async ({ appointment, reason = '', cancel
         refundId = rzpRefund.refundId || `rfnd_${Date.now()}`;
       } else {
         const refundRes = await createRefund({
-          paymentIntentId: appointment.paymentId && appointment.paymentId.startsWith('pi_') ? appointment.paymentId : null,
-          sessionId: appointment.stripe_session_id || null,
+          paymentIntentId: (appointment.paymentId && String(appointment.paymentId).startsWith('pi_')) ? appointment.paymentId : null,
+          sessionId: appointment.stripe_session_id || (appointment.paymentId && String(appointment.paymentId).startsWith('cs_') ? appointment.paymentId : null),
           paymentId: appointment.paymentId || null,
           amountInr: refundCalc.refundAmount,
           reason: 'requested_by_customer'
@@ -139,6 +139,41 @@ const executeAppointmentCancellation = async ({ appointment, reason = '', cancel
     updatedAppointment = { ...appointment, ...patch };
   }
 
+  // Sync payments table if there is an associated payment record
+  try {
+    const payPatch = {
+      status: 'refunded',
+      refund_id: refundId,
+      refund_amount: refundCalc.refundAmount,
+      updated_at: now
+    };
+    if (supabase) {
+      if (appointment.stripe_session_id) {
+        await supabase.from('payments').update(payPatch).eq('stripe_session_id', appointment.stripe_session_id);
+      }
+      if (appointment.paymentId) {
+        await supabase.from('payments').update(payPatch).eq('stripe_session_id', appointment.paymentId);
+      }
+      if (appointment.id) {
+        await supabase.from('payments').update(payPatch).eq('booking_id', appointment.id);
+      }
+    }
+    if (db && Array.isArray(db.payments)) {
+      db.payments.forEach((p) => {
+        if (
+          (appointment.stripe_session_id && p.stripe_session_id === appointment.stripe_session_id) ||
+          (appointment.paymentId && (p.stripe_session_id === appointment.paymentId || p.paymentId === appointment.paymentId)) ||
+          (appointment.id && String(p.booking_id) === String(appointment.id))
+        ) {
+          Object.assign(p, payPatch);
+        }
+      });
+      writeDB(db);
+    }
+  } catch (payErr) {
+    console.warn('[appointments] Payments table refund sync warning:', payErr.message);
+  }
+
   // Generate cancellation invoice PDF
   let cancellationPdfBuffer = null;
   try {
@@ -193,7 +228,8 @@ const executeAppointmentCancellation = async ({ appointment, reason = '', cancel
   }).catch((e) => console.error('[appointments] superadmin cancel notification failed:', e));
 
   broadcast('appointment_updated', updatedAppointment);
-  broadcast('appointment_cancelled', { id: updatedAppointment.id, appointmentNumber: updatedAppointment.appointment_number });
+  broadcast('appointment_cancelled', { id: updatedAppointment.id, appointmentNumber: updatedAppointment.appointment_number, date: updatedAppointment.date, hospitalId: updatedAppointment.hospitalId });
+  broadcast('slots_updated', { date: updatedAppointment.date, hospitalId: updatedAppointment.hospitalId });
 
   return updatedAppointment;
 };

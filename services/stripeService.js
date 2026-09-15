@@ -246,11 +246,16 @@ const createAppointmentCheckoutSession = async ({ bookingDetails, appointmentId,
 // ─── Create refund for an appointment or charge ───────────────
 const createRefund = async ({ paymentIntentId, sessionId, paymentId, amountInr, reason = 'requested_by_customer' }) => {
   let piId = paymentIntentId;
+  let effectiveSessionId = sessionId;
+
+  if (!effectiveSessionId && paymentId && String(paymentId).startsWith('cs_')) {
+    effectiveSessionId = paymentId;
+  }
 
   // If sessionId is provided but no paymentIntentId, retrieve session to get payment_intent
-  if (!piId && sessionId && stripe) {
+  if (!piId && effectiveSessionId && stripe) {
     try {
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const session = await stripe.checkout.sessions.retrieve(effectiveSessionId);
       if (session && session.payment_intent) {
         piId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent.id;
       }
