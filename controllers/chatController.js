@@ -3,7 +3,7 @@ const { supabase } = require('../config/supabase');
 const { readDB } = require('../models');
 const { getDailyTimeSlots } = require('../services/schedulerService');
 
-// ─── Default Medical & Hospital Knowledge Base ─────────────────
+// ─── Default Diagnostic Lab Tests ──────────────────────────────
 const POPULAR_LAB_TESTS = [
   { name: 'Complete Blood Count (CBC)', price: 350, fasting: 'Not required', turnaround: 'Same day (4 hrs)', category: 'Hematology' },
   { name: 'Lipid Profile (Cholesterol)', price: 750, fasting: '10-12 hrs fasting required', turnaround: '24 hours', category: 'Biochemistry' },
@@ -12,7 +12,9 @@ const POPULAR_LAB_TESTS = [
   { name: 'Liver Function Test (LFT)', price: 800, fasting: '8-10 hrs fasting required', turnaround: '12 hours', category: 'Biochemistry' },
   { name: 'Kidney Function Test (KFT/RFT)', price: 750, fasting: 'Not required', turnaround: '12 hours', category: 'Biochemistry' },
   { name: 'Digital Chest X-Ray (PA View)', price: 450, fasting: 'Not required', turnaround: '1 hour', category: 'Radiology' },
-  { name: '12-Lead Electrocardiogram (ECG)', price: 400, fasting: 'Not required', turnaround: 'Instant', category: 'Cardiology' }
+  { name: '12-Lead Electrocardiogram (ECG)', price: 400, fasting: 'Not required', turnaround: 'Instant', category: 'Cardiology' },
+  { name: 'Vitamin D3 & B12 Total Package', price: 1200, fasting: 'Not required', turnaround: '24 hours', category: 'Immunology' },
+  { name: 'Urine Routine & Microscopy (R/M)', price: 200, fasting: 'Fresh morning sample', turnaround: '2 hours', category: 'Clinical Pathology' }
 ];
 
 const SPECIALTIES = [
@@ -24,6 +26,479 @@ const SPECIALTIES = [
   { name: 'General Medicine', desc: 'Fever, diabetes, infectious diseases & wellness', icon: '🩺' },
   { name: 'Gynecology & Obstetrics', desc: 'Women health, maternity care & fertility', icon: '🌸' },
   { name: 'Ophthalmology', desc: 'Eye care, cataract, retina & vision testing', icon: '👁️' }
+];
+
+// ─── Comprehensive Knowledge Base & Text Question-Answer Database ───
+const KNOWLEDGE_FAQS = [
+  {
+    id: 'how_to_book',
+    keywords: ['how to book', 'booking step', 'how do i book', 'appointment process', 'how to schedule', 'steps to book', 'book a slot', 'how book works'],
+    reply: `🩺 **How to Book an Appointment (Step-by-Step):**\n\n` +
+      `1. **Choose Service / Doctor:** Select your preferred medical department (Cardiology, Neurology, Pediatrics, etc.) or diagnostic lab test.\n` +
+      `2. **Select Hospital & Date:** Pick an accredited hospital in your city and choose your preferred date on the interactive calendar.\n` +
+      `3. **Pick an Available Slot:** Choose an open 30-minute time slot (e.g. 10:00 AM, 11:30 AM, 2:30 PM).\n` +
+      `4. **Fill Patient Details:** Enter patient name, 10-digit mobile number, and email.\n` +
+      `5. **Instant Payment & Confirmation:** Pay securely via UPI, Card, or Net Banking. You will receive an instant booking confirmation email with your **4-digit appointment number** and PDF invoice!`,
+    quickReplies: ['Book Doctor Now', 'Book Lab Test', 'Track My Appointment', 'Explore Hospitals'],
+    action: { type: 'open_booking_modal', url: '/dashboard/book-appointment' }
+  },
+  {
+    id: 'documents_to_bring',
+    keywords: ['document', 'what to bring', 'what to carry', 'id proof', 'documents needed', 'bring with me', 'paperwork'],
+    reply: `📋 **Documents to Bring for Your Appointment:**\n\n` +
+      `* 🆔 **Valid Photo ID:** Aadhar Card, PAN Card, Voter ID, Driving License, or Passport.\n` +
+      `* 📄 **Previous Medical Records:** Prior test reports, discharge summaries, doctor prescriptions, or scan films (X-Ray/MRI).\n` +
+      `* 💊 **Current Medication List:** Names and dosages of all medicines you are currently taking.\n` +
+      `* 💳 **Insurance / Mediclaim Card:** If you plan to claim health insurance or cashless hospitalization.\n` +
+      `* 🎟️ **Appointment Confirmation:** Digital SMS / Email receipt or your 4-digit appointment number (e.g. \`#1042\`).`,
+    quickReplies: ['Book Appointment', 'Track My Booking', 'Insurance & TPA Info', 'Contact Helpdesk']
+  },
+  {
+    id: 'fasting_guidelines',
+    keywords: ['fasting', 'fasting for test', 'empty stomach', 'water before test', 'food before blood test', 'can i eat before', 'fasting requirement'],
+    reply: `🧪 **Fasting Guidelines for Diagnostic Lab Tests:**\n\n` +
+      `* **Tests Requiring 10–12 Hours Fasting:**\n` +
+      `  * *Lipid Profile (Cholesterol, Triglycerides)*\n` +
+      `  * *Fasting Blood Glucose (Sugar)*\n` +
+      `* **Tests Requiring 8–10 Hours Fasting:**\n` +
+      `  * *Liver Function Test (LFT)*\n` +
+      `  * *Ultrasound Abdomen & Pelvis*\n` +
+      `* **Tests NOT Requiring Fasting (Can be done anytime):**\n` +
+      `  * *Complete Blood Count (CBC)*\n` +
+      `  * *Thyroid Profile (T3, T4, TSH)* — Morning sample preferred.\n` +
+      `  * *HbA1c (Glycated Hemoglobin)*\n` +
+      `  * *Kidney Function Test (KFT/RFT)*\n` +
+      `  * *ECG & Chest X-Ray*\n\n` +
+      `💧 *Tip: Plain drinking water is allowed and recommended before blood collection to prevent dehydration.*`,
+    quickReplies: ['Book Blood Test', 'View All Lab Tests', 'Book Doctor Consult', 'Report Turnaround Time']
+  },
+  {
+    id: 'report_turnaround',
+    keywords: ['report time', 'when will report come', 'how to get report', 'download report', 'test result time', 'turnaround', 'when report ready'],
+    reply: `📄 **Diagnostic Test Results & Delivery Timelines:**\n\n` +
+      `* **Routine Blood & Urine Tests (CBC, Glucose, Urine R/M):** Ready within **3–5 hours**.\n` +
+      `* **Biochemistry & Hormone Panels (Thyroid, Lipid, LFT, KFT):** Ready within **12–24 hours**.\n` +
+      `* **Imaging & Radiology (Digital X-Ray, ECG):** Reports ready within **30–60 minutes**.\n` +
+      `* **Specialized Pathology (Biopsy, Culture, Vitamin D3):** Ready within **48–72 hours**.\n\n` +
+      `📲 **How You Receive Reports:** Verified digital reports with QR signatures are automatically emailed to your inbox and accessible directly on your [My Appointments](/dashboard/my-appointments) portal.`,
+    quickReplies: ['View My Appointments', 'Book Lab Test', 'Track Appointment Status', 'Contact Lab Desk']
+  },
+  {
+    id: 'visiting_hours',
+    keywords: ['visiting hour', 'visit patient', 'meeting time', 'inpatient timing', 'visitor rule', 'attendant pass', 'when can i visit'],
+    reply: `🕒 **Hospital Visiting Hours & Visitor Guidelines:**\n\n` +
+      `* **General & Semi-Private Wards:**\n` +
+      `  * 🌅 *Morning Session:* **10:00 AM – 12:00 PM**\n` +
+      `  * 🌆 *Evening Session:* **5:00 PM – 7:30 PM**\n` +
+      `* **Intensive Care Units (ICU / CCU / NICU):**\n` +
+      `  * ⏰ *Restricted Hours:* **4:30 PM – 5:30 PM** (Only 1 immediate family member allowed at a time with sterile gown/mask).\n` +
+      `* **Attendant Guidelines:** Only 1 primary attendant is permitted to stay 24/7 with the patient in private and semi-private rooms with a valid hospital attendant pass.`,
+    quickReplies: ['Check Bed Availability', 'Hospital Address', 'Emergency Hotline', 'Talk to Reception']
+  },
+  {
+    id: 'late_arrival',
+    keywords: ['late', 'arrive late', 'running late', 'delayed', 'miss appointment', 'what if late'],
+    reply: `⏰ **Late Arrival & Delay Policy:**\n\n` +
+      `* **15-Minute Grace Period:** If you are running up to 15 minutes late, your appointment slot is maintained, though there may be a short wait.\n` +
+      `* **Rescheduling On The Go:** If delayed significantly, you can easily reschedule to a later time slot on the same day or a future date directly from [My Appointments](/dashboard/my-appointments) at **no additional cost**.\n` +
+      `* 📞 You can also call the hospital reception to notify the OPD coordinator so the doctor can accommodate your queue.`,
+    quickReplies: ['View My Appointments', 'Reschedule Slot', 'Call Reception', 'Book New Appointment']
+  },
+  {
+    id: 'book_for_others',
+    keywords: ['someone else', 'family member', 'my child', 'my parent', 'book for other', 'book for another', 'friend', 'pet'],
+    reply: `👥 **Booking for Family Members, Friends, or Pets:**\n\n` +
+      `**Yes, absolutely!** You can book consultations and diagnostic tests for anyone using your account:\n\n` +
+      `1. Open the booking form.\n` +
+      `2. Simply enter the **Patient's Name** (human or pet name), Age, Gender, and Medical Details.\n` +
+      `3. You can provide either your contact number or the patient's mobile number for SMS/WhatsApp reminders.\n` +
+      `4. Invoices and booking confirmation are issued in the patient's name.`,
+    quickReplies: ['Book For Family Member', 'Book Pediatrician', 'Explore Hospitals', 'Track Appointment']
+  },
+  {
+    id: 'insurance_tpa',
+    keywords: ['insurance', 'mediclaim', 'tpa', 'cashless', 'ayushman', 'star health', 'hdfc ergo', 'claim insurance', 'reimbursement', 'health card'],
+    reply: `🏥 **Health Insurance, Mediclaim & Cashless TPA Support:**\n\n` +
+      `MEDPARK accredited hospitals partner with major public and private insurance providers:\n\n` +
+      `* 🛡️ **Empaneled Insurers:** Star Health, HDFC ERGO, ICICI Lombard, Care Health, Max Bupa / Niva Bupa, Bajaj Allianz, New India Assurance, and Ayushman Bharat (PM-JAY).\n` +
+      `* 📑 **Cashless Hospitalization:** For planned surgeries or IPD admissions, visit the hospital **TPA / Insurance Desk** with your policy card, Aadhar, and doctor's admission advice.\n` +
+      `* 🧾 **OPD Reimbursement:** Download your GST-compliant digital invoice directly from our portal to file quick OPD reimbursement claims.`,
+    quickReplies: ['Download Invoice PDF', 'Explore Hospitals', 'Check Bed Availability', 'Contact TPA Desk']
+  },
+  {
+    id: 'payment_methods',
+    keywords: ['payment method', 'how to pay', 'payment mode', 'payment option', 'upi', 'credit card', 'debit card', 'cash', 'net banking', 'gpay', 'phonepe'],
+    reply: `💳 **Accepted Payment Methods:**\n\n` +
+      `We support secure, 256-bit encrypted payments across multiple channels:\n\n` +
+      `* 📱 **UPI / QR Code:** Google Pay, PhonePe, Paytm, BHIM, Amazon Pay.\n` +
+      `* 💳 **Credit & Debit Cards:** Visa, MasterCard, RuPay, Maestro, American Express.\n` +
+      `* 🏦 **Net Banking:** Supported across all major Indian & international banks.\n` +
+      `* 💵 **Hospital Front Desk:** Cash, POS swipe machines, and draft payments accepted at hospital billing counters.`,
+    quickReplies: ['Book Appointment', 'Check Pricing Plans', 'Refund Policy', 'Download Invoice']
+  },
+  {
+    id: 'consultation_fees',
+    keywords: ['consultation fee', 'doctor fee', 'how much doctor charge', 'opd fee', 'cost of consultation', 'doctor price', 'fees'],
+    reply: `💰 **Doctor Consultation Fee Structure:**\n\n` +
+      `* 🩺 **General Physician / Family Medicine:** ₹400 – ₹500\n` +
+      `* 👶 **Pediatrician / Child Specialist:** ₹500 – ₹700\n` +
+      `* 🦴 **Orthopedic / Bone Specialist:** ₹700 – ₹900\n` +
+      `* ❤️ **Cardiologist / Heart Specialist:** ₹800 – ₹1,200\n` +
+      `* 🧠 **Neurologist / Neurosurgeon:** ₹1,000 – ₹1,500\n` +
+      `* 🌸 **Gynecologist & Obstetrician:** ₹600 – ₹900\n\n` +
+      `💡 *Includes a free 7-day follow-up consultation and digital e-prescription.*`,
+    quickReplies: ['Book Specialist Doctor', 'Lab Test Packages', 'Explore Hospitals', 'Track Booking']
+  },
+  {
+    id: 'teleconsultation_info',
+    keywords: ['teleconsult', 'video call', 'online consult', 'telemedicine', 'consult online', 'virtual doctor', 'zoom consult'],
+    reply: `💻 **Online Video Teleconsultations:**\n\n` +
+      `Consult certified senior doctors from the comfort of your home:\n\n` +
+      `* 🎥 High-definition secure video call via Zoom or WebRTC.\n` +
+      `* 📄 Digital prescription sent directly to your email immediately after the session.\n` +
+      `* ⏰ Timings: Available 7 days a week from 8:00 AM to 10:00 PM.\n` +
+      `* 📲 You can join the video consult with 1 tap from your [My Appointments](/dashboard/my-appointments) portal.`,
+    quickReplies: ['Book Video Consult', 'Explore Specialties', 'Track Appointment', 'Contact Support']
+  },
+  {
+    id: 'hospital_registration',
+    keywords: ['register hospital', 'partner hospital', 'onboard clinic', 'hospital software register', 'join network', 'add my hospital'],
+    reply: `🏥 **Partnering & Registering Your Hospital with MEDPARK:**\n\n` +
+      `Hospital owners and clinic directors can join the MEDPARK ecosystem in 3 simple steps:\n\n` +
+      `1. 📅 **Schedule a Product Demo:** Book a free 30-minute walkthrough on our [Live Demo Page](/schedule).\n` +
+      `2. 💳 **Choose a Software Tier:** Select between Quarterly, Yearly, or Enterprise cloud suites.\n` +
+      `3. 📝 **Complete Registration:** Submit hospital license, bed count, and administrator contact.\n` +
+      `4. 🚀 **Go-Live:** Our superadmin team reviews and activates your dedicated hospital admin portal within **24 hours**!`,
+    quickReplies: ['Book Live Demo', 'View Software Pricing', 'Contact Enterprise Sales', 'Explore Portal']
+  },
+  {
+    id: 'data_security_hipaa',
+    keywords: ['data security', 'privacy', 'is my data safe', 'hipaa', 'gdpr', 'secure records', 'confidentiality', 'data protection'],
+    reply: `🔒 **Data Privacy, Security & Compliance:**\n\n` +
+      `Your personal health information (PHI) and clinical records are protected with industry-grade security:\n\n` +
+      `* 🛡️ **256-Bit SSL/TLS Encryption:** All database records, payments, and communication channels are encrypted in transit and at rest.\n` +
+      `* 🔐 **Role-Based Access Control (RBAC):** Superadmins, Hospital Admins, and Patients only access authorized medical records.\n` +
+      `* ☁️ **Cloud Redundancy:** Automatic daily encrypted backups preventing data loss.\n` +
+      `* 📜 Compliant with international healthcare privacy benchmarks.`,
+    quickReplies: ['Privacy Policy', 'Book Appointment', 'Hospital Pricing', 'Contact Security Team']
+  },
+  {
+    id: 'vaccination_immunization',
+    keywords: ['vaccination', 'vaccine', 'immunization', 'polio', 'bcg', 'mmr', 'flu shot', 'tetanus', 'hepatitis b', 'child vaccine', 'pediatric immunization', 'baby injection'],
+    reply: `💉 **Vaccination & Immunization Services:**\n\n` +
+      `MEDPARK partner hospitals offer complete WHO and IAP-certified vaccination schedules for infants, children, and adults:\n\n` +
+      `* 👶 **Newborn & Infant Schedule:** BCG, Hepatitis B, Oral Polio (OPV/IPV), Pentavalent, Rotavirus, PCV.\n` +
+      `* 🧒 **Childhood Boosters:** DTP, MMR (Measles, Mumps, Rubella), Varicella (Chickenpox), Typhoid, Hepatitis A.\n` +
+      `* 🧑 **Adult & Special Vaccines:** Annual Influenza (Flu Shot), Cervical Cancer (HPV), Tetanus Toxoid (TT), Pneumococcal vaccine for seniors.\n\n` +
+      `📅 *All immunizations include an official digital vaccination passport and SMS reminders for upcoming booster dates.*`,
+    quickReplies: ['Book Pediatrician', 'Book Lab Tests', 'Consult General Physician', 'Track Appointment']
+  },
+  {
+    id: 'health_checkup_packages',
+    keywords: ['health checkup', 'master checkup', 'full body checkup', 'executive health', 'annual checkup', 'wellness package', 'preventive checkup', 'body package'],
+    reply: `🩺 **Full Body Preventive Health Checkup Packages:**\n\n` +
+      `Catch health issues early with our comprehensive diagnostic wellness screenings:\n\n` +
+      `1. 🌿 **Basic Health Wellness (₹1,499):** CBC, Blood Sugar (Fasting), Lipid Profile, Urine R/M, Serum Creatinine & Physician Consultation.\n` +
+      `2. 💎 **Executive Master Health Check (₹3,499):** Basic + Liver Function (LFT), Thyroid (TSH), 12-Lead ECG, Digital Chest X-Ray & Ultrasound Abdomen.\n` +
+      `3. ❤️ **Advanced Cardiac & Diabetic Care (₹5,999):** Executive + 2D Echo / TMT Treadmill Test, HbA1c, Vitamin D3 & B12, and Senior Cardiologist Review.\n\n` +
+      `💡 *Complimentary breakfast and comprehensive summary report provided on the same day.*`,
+    quickReplies: ['Book Full Body Checkup', 'Book Blood Test', 'Consult Cardiologist', 'Explore Lab Tests']
+  },
+  {
+    id: 'maternity_pregnancy_care',
+    keywords: ['maternity', 'pregnancy', 'delivery package', 'normal delivery', 'c-section', 'cesarean', 'antenatal', 'labor room', 'obstetrics', 'baby delivery'],
+    reply: `🌸 **Maternity Care, Antenatal & Delivery Packages:**\n\n` +
+      `We provide compassionate mother & child care with 24/7 dedicated Obstetricians and Level-3 NICU:\n\n` +
+      `* 🤰 **Antenatal Care:** Trimester ultrasound scans (NT Scan, Anomaly Scan, Color Doppler), blood screening & prenatal yoga guidance.\n` +
+      `* 👶 **Normal Delivery Package:** Includes labor suite, pediatrician newborn assessment, nursing care & 2-day private room stay.\n` +
+      `* 🏥 **LSCS / C-Section Package:** Includes modern modular OT, anesthetist, surgeon team, medications & 4-day private room stay.\n` +
+      `* 🍼 **Newborn Support:** 24/7 Neonatal Intensive Care Unit (NICU), initial immunizations, lactation counseling & birth certificate facilitation.`,
+    quickReplies: ['Book Gynecologist', 'Check Bed Availability', 'Explore Hospitals', 'Download Hospital Brochure']
+  },
+  {
+    id: 'physiotherapy_rehab',
+    keywords: ['physiotherapy', 'physio', 'rehab', 'back pain', 'knee pain', 'neck pain', 'stroke rehab', 'paralysis therapy', 'sports injury rehab', 'frozen shoulder'],
+    reply: `🏃 **Physiotherapy & Physical Rehabilitation:**\n\n` +
+      `Our certified physiotherapists provide tailored recovery protocols for pain relief and functional restoration:\n\n` +
+      `* 🦴 **Orthopedic & Spine Care:** Sciatica, slip disc, cervical spondylosis, osteoarthritis knee, frozen shoulder & post-fracture mobility.\n` +
+      `* 🧠 **Neuro-Rehabilitation:** Post-stroke hemiplegia therapy, Parkinson's gait training & spinal cord rehabilitation.\n` +
+      `* ⚡ **Advanced Modalities:** Ultrasound therapy, IFT (Interferential Therapy), TENS, Traction & Laser pain therapy.\n` +
+      `* 🏡 **Home Physiotherapy:** Experienced therapists available for home care sessions for elderly and bedridden patients.`,
+    quickReplies: ['Book Orthopedic Consult', 'Book Physiotherapy', 'Explore Specialties', 'Track Booking']
+  },
+  {
+    id: 'post_op_wound_care',
+    keywords: ['post op', 'after surgery', 'wound care', 'stitches', 'surgical recovery', 'dressing change', 'surgery recovery', 'cut wound'],
+    reply: `🩹 **Post-Operative Surgery Recovery & Wound Care Guidelines:**\n\n` +
+      `* 🚿 **Keep Dressing Clean & Dry:** Do not wet the surgical wound until your surgeon gives clearance. Take sponge baths instead.\n` +
+      `* 🧼 **Hand Hygiene:** Always wash hands with antibacterial soap for 20 seconds before touching or inspecting the dressing area.\n` +
+      `* 💊 **Medication Adherence:** Complete full prescribed antibiotic courses on time and do not skip prescribed pain relievers.\n` +
+      `* ⚠️ **Warning Signs — Contact Hospital Immediately If You Notice:**\n` +
+      `  * *Fever above 101°F or chills.*\n` +
+      `  * *Increased redness, swelling, warmth, or foul-smelling drainage/pus from incision.*\n` +
+      `  * *Sudden severe pain not relieved by medication.*\n` +
+      `  * *Persistent nausea, vomiting, or shortness of breath.*`,
+    quickReplies: ['Emergency Helpline', 'Book Follow-Up Consult', 'Contact Hospital Desk', 'Pharmacy Timings']
+  },
+  {
+    id: 'diabetes_hypoglycemia_care',
+    keywords: ['diabetes management', 'low sugar', 'hypoglycemia', 'insulin storage', 'sugar drop', 'shivering sugar', 'how to store insulin', 'diabetic emergency'],
+    reply: `🩸 **Diabetes Care, Low Sugar (Hypoglycemia) & Insulin Protocol:**\n\n` +
+      `* ⚠️ **Emergency "Rule of 15" for Low Blood Sugar (Below 70 mg/dL):**\n` +
+      `  * *Symptoms:* Shivering, sudden cold sweating, dizziness, rapid heartbeat, extreme hunger, confusion.\n` +
+      `  * *Step 1:* Immediately consume **15 grams of fast-acting carbohydrate** (3 teaspoons of sugar, 1/2 cup fruit juice, or 4 glucose tablets).\n` +
+      `  * *Step 2:* Wait **15 minutes** and re-check blood glucose.\n` +
+      `  * *Step 3:* If still below 70 mg/dL, repeat with another 15g of sugar. Once normal, eat a small meal/snack.\n\n` +
+      `* ❄️ **Insulin Storage Guidelines:**\n` +
+      `  * Store unopened insulin vials and pens in the refrigerator at **2°C – 8°C** (do not freeze).\n` +
+      `  * In-use insulin pen/vial can be kept at room temperature (below 25°C) away from direct sunlight for up to **28 days**.`,
+    quickReplies: ['Book HbA1c Diabetes Test', 'Consult Diabetologist', 'Diet Plan Consult', 'Emergency Helpline']
+  },
+  {
+    id: 'high_bp_hypertension_care',
+    keywords: ['high bp', 'hypertension', 'high blood pressure', 'bp emergency', 'bp 180', 'severe headache bp', 'hypertensive crisis'],
+    reply: `❤️ **High Blood Pressure (Hypertension) Management:**\n\n` +
+      `* 📊 **Understanding BP Readings:**\n` +
+      `  * *Normal:* Less than 120/80 mmHg\n` +
+      `  * *Stage 1 Hypertension:* 130–139 / 80–89 mmHg\n` +
+      `  * *Stage 2 Hypertension:* 140+ / 90+ mmHg\n\n` +
+      `* 🚨 **Hypertensive Crisis (BP > 180/120 mmHg):**\n` +
+      `  * If your BP reading is **180/120 mmHg or higher**, rest calmly for 5 minutes and re-test.\n` +
+      `  * **If accompanied by:** Chest pain, severe headache, blurred vision, numbness, or difficulty speaking — **Seek immediate emergency casualty medical care.**`,
+    quickReplies: ['Book Cardiologist', 'Emergency Helpline (1800-419-1234)', 'Book Lipid Profile', 'Explore Hospitals']
+  },
+  {
+    id: 'blood_donation_bank',
+    keywords: ['blood donation', 'donate blood', 'blood bank', 'plasma', 'blood group', 'o negative blood', 'platelet donor', 'need blood'],
+    reply: `🩸 **24/7 Hospital Blood Bank & Blood Donation:**\n\n` +
+      `* 🏥 **24/7 Availability:** Our NABL-certified blood bank maintains tested components: Packed Red Blood Cells (PRBC), Fresh Frozen Plasma (FFP), and Single Donor Platelets (SDP).\n` +
+      `* 🙋 **Who Can Donate Blood?**\n` +
+      `  * Age between **18 and 65 years**.\n` +
+      `  * Body weight of **45 kg or above**.\n` +
+      `  * Hemoglobin level of at least **12.5 g/dL**.\n` +
+      `  * No alcohol consumption in the last 24 hours.\n` +
+      `* ⏱️ Donation takes only 10–15 minutes and can save up to 3 lives!`,
+    quickReplies: ['Blood Bank Helpline', 'Book Blood Test', 'Emergency Hotline', 'Hospital Locations']
+  },
+  {
+    id: 'hospital_admission_ipd',
+    keywords: ['hospital admission', 'admit patient', 'ipd process', 'admission procedure', 'bed booking', 'planned admission', 'emergency admission', 'room categories'],
+    reply: `🛏️ **Hospital Admission (IPD) Procedure:**\n\n` +
+      `* 📝 **Planned Admission:**\n` +
+      `  1. Present the Doctor's Admission Slip at the central **IPD Admission Desk**.\n` +
+      `  2. Choose room type (General Ward, Semi-Private, Deluxe Single Room, Suite).\n` +
+      `  3. Submit Photo ID (Aadhar/Passport) and Insurance TPA card for cashless approval.\n` +
+      `* 🚨 **Emergency Admission:** Immediate clinical stabilization in Casualty/ER triage first; administrative admission paperwork is completed subsequently by hospital counselors.\n` +
+      `* 🛡️ All inpatient rooms feature nurse call bells, central medical oxygen, and HEPA air filtration.`,
+    quickReplies: ['Check Bed Availability', 'Insurance & TPA Info', 'Explore Hospitals', 'Emergency Helpline']
+  },
+  {
+    id: 'hospital_discharge_process',
+    keywords: ['discharge process', 'discharge timing', 'when can patient go home', 'discharge summary', 'tpa discharge approval', 'discharge settlement', 'leave hospital'],
+    reply: `🏁 **Hospital Discharge Process & Timeline:**\n\n` +
+      `* 🌅 **Morning Rounds:** Treating consultant reviews patient vitals and signs the official medical discharge order (usually between 9:00 AM – 11:00 AM).\n` +
+      `* 📄 **Discharge Summary & Prescription:** Resident doctors prepare detailed summary of diagnosis, procedures performed, diet advice, and medication schedule.\n` +
+      `* 🛡️ **Cashless Insurance TPA Clearance:** Final bill and summary are submitted electronically to TPA. Final approval typically takes **2 to 3 hours**.\n` +
+      `* 💊 **Pharmacy & Final Settlement:** Home medications are dispensed, remaining security deposit refunded, and attendant receives the stamped discharge file.`,
+    quickReplies: ['Download Discharge Summary', 'My Appointments', 'Insurance Desk Info', 'Contact Helpdesk']
+  },
+  {
+    id: 'senior_citizen_geriatric',
+    keywords: ['senior citizen', 'elderly care', 'geriatric', 'old age patient', 'wheelchair assistance', 'priority queue', 'elderly discount'],
+    reply: `👴 **Senior Citizen & Geriatric Care Services:**\n\n` +
+      `We offer dedicated convenience and care protocols for our elderly patients:\n\n` +
+      `* ♿ **Free Wheelchair & Stretcher Assistance:** Trained patient helpers available right at the hospital main entrance/porch.\n` +
+      `* ⚡ **Priority OPD & Billing Counters:** Fast-tracked registration, consultation, and pharmacy queues for seniors (60+ years).\n` +
+      `* 🏠 **Home Sample Collection:** Phlebotomists visit your home for blood and urine sample collections.\n` +
+      `* 🩺 **Comprehensive Geriatric Screening:** Memory & cognitive evaluation, fall prevention, joint mobility, and bone mineral density (DEXA) tests.`,
+    quickReplies: ['Book Home Sample Collection', 'Book Geriatric Specialist', 'Explore Hospitals', 'Contact Reception']
+  },
+  {
+    id: 'home_sample_collection',
+    keywords: ['home sample', 'sample collection at home', 'blood test at home', 'doorstep lab test', 'home visit blood test', 'phlebotomy at home'],
+    reply: `🏠 **Doorstep Home Diagnostic Sample Collection:**\n\n` +
+      `Get blood and urine tests collected safely from the comfort of your home:\n\n` +
+      `* 🧤 **Safe & Sterile:** Certified phlebotomists follow 100% sterile vacutainer protocols with single-use barcoded tubes.\n` +
+      `* ⏰ **Flexible Morning Slots:** Phlebotomists available from **6:30 AM to 11:30 AM** (ideal for fasting tests like Lipid & Glucose).\n` +
+      `* 📱 **Instant Digital Results:** Reports automatically synced and emailed to your portal within 6–24 hours.\n` +
+      `* 💰 Standard nominal home visit convenience charge (₹150) or **FREE** on bookings above ₹999.`,
+    quickReplies: ['Book Blood Test at Home', 'Explore Lab Packages', 'Track Lab Reports', 'Contact Lab Helpdesk']
+  },
+  {
+    id: 'mental_health_psychology',
+    keywords: ['mental health', 'psychiatrist', 'psychologist', 'depression', 'anxiety', 'stress counseling', 'therapy session', 'counselor', 'insomnia', 'panic attack'],
+    reply: `🧠 **Mental Health, Psychology & Counseling Services:**\n\n` +
+      `We offer compassionate, strictly confidential psychiatric and psychological support:\n\n` +
+      `* 🌿 **Areas of Care:** Generalized anxiety, depression, burnout & stress management, sleep disorders (insomnia), OCD, panic attacks, and relationship counseling.\n` +
+      `* 🗣️ **Therapy Approaches:** Cognitive Behavioral Therapy (CBT), Mindfulness-Based Therapy & psychotherapeutic counseling.\n` +
+      `* 💻 Available via in-person clinic consultations or secure private online video sessions.`,
+    quickReplies: ['Book Psychologist Consult', 'Book Video Teleconsult', 'Emergency Mental Health Helpline', 'Specialties']
+  },
+  {
+    id: 'diet_nutrition_counseling',
+    keywords: ['dietitian', 'nutritionist', 'diet plan', 'diabetic diet', 'weight loss diet', 'renal diet', 'heart healthy diet', 'food chart'],
+    reply: `🥗 **Clinical Dietetics & Nutritional Counseling:**\n\n` +
+      `Our clinical nutritionists craft individualized, science-backed dietary plans:\n\n` +
+      `* 🩸 **Diabetic Meal Planning:** Low-glycemic index diets, carbohydrate counting & post-meal glucose stabilization.\n` +
+      `* ❤️ **Cardiac & Hypertension Diet:** DASH diet, low-sodium meal strategies & cholesterol reduction.\n` +
+      `* 🫘 **Renal & Liver Care Diet:** Low-potassium, controlled-protein nutritional charts.\n` +
+      `* ⚖️ **Medical Weight Management:** Sustainable calorie deficit plans without crash dieting.`,
+    quickReplies: ['Book Nutritionist Consult', 'Book Master Health Checkup', 'Explore Doctors', 'Track Booking']
+  },
+  {
+    id: 'eye_care_cataract',
+    keywords: ['cataract', 'lasik', 'eye surgery', 'eye checkup', 'vision test', 'glaucoma', 'ophthalmology service', 'spectacles power', 'eye doctor'],
+    reply: `👁️ **Eye Care, Cataract & Ophthalmology Services:**\n\n` +
+      `* 🌟 **Daycare Cataract Surgery (Phaco):** Stitchless, micro-incision phacoemulsification with premium Monofocal, Toric & Multifocal intraocular lenses (IOLs). Return home the same day!\n` +
+      `* 👓 **Refractive Suite & LASIK:** Advanced laser vision correction for spectacle-free clear vision.\n` +
+      `* 🔬 **Glaucoma & Retina Care:** Optical Coherence Tomography (OCT), fundus photography & diabetic retinopathy laser management.\n` +
+      `* 💻 **Computer Vision Syndrome:** Ergonomic and blue-light eye strain evaluations for professionals.`,
+    quickReplies: ['Book Ophthalmologist', 'Explore Specialties', 'Hospital Bed Availability', 'Track Appointment']
+  },
+  {
+    id: 'dental_services_ortho',
+    keywords: ['dental', 'dentist', 'root canal', 'rct', 'teeth cleaning', 'dental implant', 'braces', 'toothache', 'dental scaling', 'cavity'],
+    reply: `🦷 **Comprehensive Dental & Maxillofacial Care:**\n\n` +
+      `* ⚡ **Single-Sitting Root Canal (RCT):** Painless motorized endodontic treatment with digital apex locators.\n` +
+      `* 💎 **Dental Implants & Crowns:** Permanent titanium implants, zirconia crowns & bridge replacements.\n` +
+      `* 🪥 **Preventive Cleaning & Polishing:** Ultrasonic scaling for plaque and stain removal.\n` +
+      `* 😬 **Orthodontics & Clear Aligners:** Invisible aligners and metal/ceramic braces for teeth straightening.`,
+    quickReplies: ['Book Dentist Consult', 'Explore Specialties', 'Emergency Toothache Help', 'Track Booking']
+  },
+  {
+    id: 'prescription_refills',
+    keywords: ['prescription validity', 'refill medicine', 'repeat prescription', 'how long prescription valid', 'follow up consultation', 'doctor prescription'],
+    reply: `📋 **Prescription Validity & Medicine Refill Guidelines:**\n\n` +
+      `* ⏳ **Prescription Validity:**\n` +
+      `  * *Acute Illnesses (Fever, Infections, Cough):* Valid for **7 to 14 days**.\n` +
+      `  * *Chronic Maintenance (Hypertension, Thyroid, Diabetes):* Valid for up to **6 months** before routine review.\n` +
+      `* 🆓 **7-Day Free Follow-Up:** Most OPD consultations include a complimentary follow-up within 7 days to review lab results and adjust dosages.\n` +
+      `* 📲 You can download all your verified e-prescriptions anytime from [My Appointments](/dashboard/my-appointments).`,
+    quickReplies: ['View My Appointments', 'Book Doctor Consult', '24/7 Pharmacy', 'Contact Doctor']
+  },
+  {
+    id: 'hospital_amenities_parking',
+    keywords: ['parking', 'cafeteria', 'food court', 'hospital amenities', 'wifi', 'guest house', 'stay for attendants', 'facilities'],
+    reply: `🏢 **Hospital Facilities, Parking & Campus Amenities:**\n\n` +
+      `* 🚗 **Valet & Multi-Level Parking:** Dedicated covered 24/7 parking with electric vehicle (EV) charging stations.\n` +
+      `* 🍽️ **Hygienic Cafeteria & Food Court:** Clean, nutritious multi-cuisine meals, fresh juices, and special patient diet trays.\n` +
+      `* 📶 **Free High-Speed Wi-Fi:** Seamless internet across all OPD waiting lounges and IPD rooms.\n` +
+      `* 🏧 **Banking & ATMs:** 24/7 ATM counters located at the ground floor lobby.\n` +
+      `* 🛌 **Attendant Accommodations:** Hospital guest rooms and partner lodging available for outstation patient families.`,
+    quickReplies: ['Hospital Locations', 'Check Bed Availability', 'Emergency Helplines', 'Contact Helpdesk']
+  },
+  {
+    id: 'second_opinion_tumor',
+    keywords: ['second opinion', 'doctor second opinion', 'tumor board', 'cancer opinion', 'surgery second opinion', 'medical second opinion'],
+    reply: `📑 **Expert Second Medical Opinion & Tumor Board Review:**\n\n` +
+      `Make confident healthcare decisions with our multidisciplinary clinical review boards:\n\n` +
+      `* 👨‍⚕️ **Senior Specialist Panel:** Have your medical case reviewed by department heads and academic leaders in Oncology, Cardiology, Orthopedics, and Neurology.\n` +
+      `* 🔬 **Biopsy & Radiology Re-Evaluation:** Our pathology and radiology experts cross-verify MRI/CT scans and biopsy slide blocks.\n` +
+      `* 🌐 **Online or In-Person:** Submit your previous medical records digitally and receive a formal second opinion consensus report within **48 hours**.`,
+    quickReplies: ['Book Specialist Doctor', 'Upload Medical Records', 'Explore Specialties', 'Contact Care Coordinator']
+  },
+  {
+    id: 'child_fever_choking_firstaid',
+    keywords: ['child choking', 'baby fever', 'infant emergency', 'febrile seizure', 'child first aid', 'baby temperature', 'pediatric emergency'],
+    reply: `👶 **Pediatric First Aid: Infant Fever & Choking Emergencies**\n\n` +
+      `* 🌡️ **Infant High Fever (Above 100.4°F in babies under 3 months or >102°F in children):**\n` +
+      `  * Remove excess blankets/clothing to prevent heat entrapment.\n` +
+      `  * Sponge body with **lukewarm water** (never use cold/ice water or rubbing alcohol).\n` +
+      `  * Ensure frequent hydration (breastmilk, formula, or water/ORS for older kids).\n` +
+      `  * Consult a pediatrician promptly before administering over-the-counter fever syrups.\n\n` +
+      `* 🚨 **Child Choking Emergency (Cannot breathe, cough, or cry):**\n` +
+      `  * **Infant (< 1 yr):** Lay baby face down along your forearm supporting jaw; give **5 firm back blows** between shoulder blades. If still blocked, turn over and give **5 chest thrusts** using 2 fingers.\n` +
+      `  * **Older Child (> 1 yr):** Perform the Heimlich maneuver (abdominal thrusts) just above navel.\n` +
+      `  * **Call Emergency (108 / 112) immediately!**`,
+    quickReplies: ['🚨 Emergency Hotline (1800-419-1234)', 'Book Pediatrician', 'Nearest Hospital', 'Casualty Desk']
+  },
+  {
+    id: 'allergy_anaphylaxis_firstaid',
+    keywords: ['allergy', 'allergic reaction', 'anaphylaxis', 'swollen lips', 'hives', 'food allergy', 'drug allergy', 'bee sting'],
+    reply: `⚠️ **Allergy & Severe Anaphylaxis Emergency First Aid:**\n\n` +
+      `* 🚨 **Signs of Severe Allergic Reaction (Anaphylaxis):**\n` +
+      `  * *Swelling of lips, tongue, face, or throat throat tightness.*\n` +
+      `  * *Difficulty breathing, wheezing, or stridor.*\n` +
+      `  * *Widespread itchy red hives, dizziness, fainting, or rapid pulse drop.*\n\n` +
+      `* 🚑 **Immediate Actions:**\n` +
+      `  1. **Call 108 / 112 or MEDPARK Emergency (+91-1800-419-1234) immediately.**\n` +
+      `  2. If the patient carries an **EpiPen (auto-injector adrenaline)**, administer it immediately into the outer mid-thigh.\n` +
+      `  3. Have the person lie flat with legs elevated. If breathing is difficult, keep them seated upright. Do not offer oral fluids.`,
+    quickReplies: ['🚨 Call Ambulance Now', 'Nearest Casualty Hospital', 'Book Dermatologist', 'Emergency Helpline']
+  },
+  {
+    id: 'abha_digital_health_card',
+    keywords: ['abha', 'abha card', 'abdm', 'digital health locker', 'ayushman health id', 'link abha', 'health account'],
+    reply: `🆔 **ABHA (Ayushman Bharat Health Account) Digital Integration:**\n\n` +
+      `MEDPARK is fully integrated with India's Ayushman Bharat Digital Mission (ABDM):\n\n` +
+      `* 🌟 **What is ABHA?** A unique 14-digit digital health ID that lets you digitally access, store, and share your diagnostic reports, prescriptions, and discharge summaries across India.\n` +
+      `* 🔒 **100% Consent-Driven:** Medical records are only shared with your explicit digital OTP consent.\n` +
+      `* 📲 You can link your ABHA card in [My Profile](/profile) to automatically sync all past hospital records!`,
+    quickReplies: ['Go to My Profile', 'Book Doctor Appointment', 'Explore Hospital Portal', 'Contact Support']
+  },
+  {
+    id: 'fever_first_aid',
+    keywords: ['fever', 'high fever', 'temperature', 'fever treatment', 'first aid fever', 'fever remedy'],
+    reply: `🌡️ **Medical Guidance for Fever:**\n\n` +
+      `* 💧 **Hydration:** Drink plenty of fluids (water, ORS, clear soups, coconut water).\n` +
+      `* 🛌 **Rest:** Rest in a well-ventilated, comfortable room.\n` +
+      `* 🧊 **Cool Compresses:** Apply a cool, damp washcloth to forehead, neck, or wrists to help lower body heat.\n` +
+      `* ⚠️ **When to Seek Immediate Medical Help:**\n` +
+      `  * Temperature above **103°F (39.4°C)** or fever persisting for more than 48 hours.\n` +
+      `  * Accompanied by severe headache, stiff neck, breathing difficulty, or rash.\n` +
+      `  * For infants under 3 months with temperature over 100.4°F.`,
+    quickReplies: ['Book General Physician', 'Book Pediatrician', 'Emergency Helpline', 'Lab Blood Tests']
+  },
+  {
+    id: 'chest_pain_emergency',
+    keywords: ['chest pain', 'heart attack', 'cardiac emergency', 'angina', 'left arm pain', 'breathless'],
+    reply: `🚨 **CRITICAL HEALTH WARNING: Chest Pain & Cardiac Symptoms**\n\n` +
+      `If you or someone nearby is experiencing:\n` +
+      `* *Pressure, tightness, crushing pain in chest or center of chest*\n` +
+      `* *Pain spreading to left shoulder, arm, neck, jaw, or back*\n` +
+      `* *Sudden cold sweat, dizziness, nausea, or shortness of breath*\n\n` +
+      `⚠️ **DO NOT WAIT — CALL EMERGENCY IMMEDIATELY:**\n` +
+      `* 🚑 **National Ambulance:** **108** / **112**\n` +
+      `* 🏥 **MEDPARK Cardiac Emergency Hotline:** **+91-1800-419-1234**\n` +
+      `* Keep the patient seated upright, loosen tight clothing, and avoid sudden physical exertion.`,
+    quickReplies: ['🚨 Call Ambulance (108)', 'Nearest Cardiac Hospital', 'Casualty Helpline', 'Cardiologist On Call'],
+    action: { type: 'emergency_call', phone: '18004191234' }
+  },
+  {
+    id: 'blood_pressure_sugar_normal',
+    keywords: ['normal blood pressure', 'normal sugar', 'bp range', 'sugar range', 'normal glucose', 'hypertension range', 'diabetes range'],
+    reply: `📊 **Standard Reference Ranges for BP & Blood Glucose:**\n\n` +
+      `* ❤️ **Blood Pressure (Adults):**\n` +
+      `  * *Normal:* Less than **120 / 80 mmHg**\n` +
+      `  * *Elevated:* 120–129 / <80 mmHg\n` +
+      `  * *Stage 1 Hypertension:* 130–139 / 80–89 mmHg\n` +
+      `  * *Stage 2 Hypertension:* 140+ / 90+ mmHg\n\n` +
+      `* 🩸 **Blood Glucose (Sugar):**\n` +
+      `  * *Fasting (8-10 hrs):* **70 – 99 mg/dL** (Normal) | 100–125 mg/dL (Pre-diabetes) | 126+ mg/dL (Diabetes)\n` +
+      `  * *Post-Prandial (2 hrs after meal):* Less than **140 mg/dL**\n` +
+      `  * *HbA1c (3-Month Average):* Below **5.7%** (Normal) | 5.7%–6.4% (Pre-diabetes) | 6.5%+ (Diabetes)`,
+    quickReplies: ['Book HbA1c Diabetes Test', 'Book Lipid Profile', 'Consult Cardiologist', 'Book Full Body Checkup']
+  },
+  {
+    id: 'pharmacy_timing',
+    keywords: ['pharmacy', 'chemist', 'medicine', 'drug store', 'pharmacy timing', 'medicine shop', 'medical store'],
+    reply: `💊 **24/7 Hospital Pharmacy Services:**\n\n` +
+      `* 🏪 **Timings:** All in-hospital pharmacies operate **24 Hours a Day, 7 Days a Week**.\n` +
+      `* 📦 **Availability:** 100% genuine prescribed drugs, emergency cardiac medications, pediatric drops, orthopedic supports, and surgical consumables.\n` +
+      `* 🧾 Digital prescription integration available directly from your doctor consultation.`,
+    quickReplies: ['Find Nearest Hospital', 'Book Doctor Consult', 'Emergency Helplines', 'Contact Support']
+  },
+  {
+    id: 'change_password_profile',
+    keywords: ['change password', 'edit profile', 'update profile', 'change phone', 'change email', 'update address', 'my account settings'],
+    reply: `⚙️ **Updating Your Profile & Changing Password:**\n\n` +
+      `1. Click on your **Profile Avatar / Pill** in the top navigation bar.\n` +
+      `2. Select **My Profile & Settings** (or go to [/profile](/profile)).\n` +
+      `3. **To update details:** Edit your Name, Mobile, Address, Blood Group, or Emergency Contact and click *Save Changes*.\n` +
+      `4. **To change password:** Scroll to the *Security & Password* section, enter your current password, choose a new password (min 6 characters), and click *Update Password*.`,
+    quickReplies: ['Go To My Profile', 'My Appointments', 'View Dashboard', 'Contact Helpdesk'],
+    action: { type: 'view_profile', url: '/profile' }
+  }
 ];
 
 // ─── Helper: Query Appointment by 4-digit number ────────────────
@@ -159,7 +634,22 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 3. BOOK APPOINTMENT INTENT
+    // 3. CHECK COMPREHENSIVE KNOWLEDGE BASE / FAQS FIRST
+    // ─────────────────────────────────────────────────────────────
+    for (const faq of KNOWLEDGE_FAQS) {
+      const match = faq.keywords.some((k) => lower.includes(k));
+      if (match) {
+        return res.json({
+          reply: faq.reply,
+          intent: faq.id,
+          quickReplies: faq.quickReplies || ['Book Doctor', 'Lab Tests & Prices', 'Track Appointment #', 'Emergency Helpline'],
+          action: faq.action || null
+        });
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 4. BOOK APPOINTMENT INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('book') ||
@@ -197,7 +687,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 4. DIAGNOSTIC LAB TESTS & SERVICES INTENT
+    // 5. DIAGNOSTIC LAB TESTS & SERVICES INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('lab') ||
@@ -211,7 +701,7 @@ const processChatMessage = async (req, res) => {
       lower.includes('diagnostic') ||
       lower.includes('pathology')
     ) {
-      const testListMarkdown = POPULAR_LAB_TESTS.slice(0, 5)
+      const testListMarkdown = POPULAR_LAB_TESTS.slice(0, 6)
         .map((t) => `* **${t.name}** — ₹${t.price} *(Turnaround: ${t.turnaround} | ${t.fasting})*`)
         .join('\n');
 
@@ -236,7 +726,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 5. EMERGENCY & HELPLINE INTENT
+    // 6. EMERGENCY & HELPLINE INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('emergency') ||
@@ -270,7 +760,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 6. SPECIALTIES & DOCTOR DISCOVERY INTENT
+    // 7. SPECIALTIES & DOCTOR DISCOVERY INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('doctor') ||
@@ -308,7 +798,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 7. HOSPITALS & BEDS INTENT
+    // 8. HOSPITALS & BEDS INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('hospital') ||
@@ -344,7 +834,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 8. PRICING & HOSPITAL SOFTWARE SUBSCRIPTIONS INTENT
+    // 9. PRICING & HOSPITAL SOFTWARE SUBSCRIPTIONS INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('pricing') ||
@@ -383,7 +873,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 9. CANCELLATION & REFUND POLICY INTENT
+    // 10. CANCELLATION & REFUND POLICY INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('cancel') ||
@@ -412,7 +902,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 10. CONTACT & SUPPORT INTENT
+    // 11. CONTACT & SUPPORT INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('contact') ||
@@ -445,7 +935,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 11. GENERAL AI / FALLBACK RESPONSES
+    // 12. GENERAL AI / FALLBACK RESPONSES
     // ─────────────────────────────────────────────────────────────
     return res.json({
       reply: `I understand you are asking about *"**${text.length > 50 ? text.slice(0, 50) + '...' : text}**"*. \n\n` +
@@ -453,17 +943,20 @@ const processChatMessage = async (req, res) => {
         `* 🩺 **Book an Appointment** with top specialist doctors.\n` +
         `* 🧪 **Book Diagnostic Lab Tests** (CBC, Lipid, Thyroid, LFT, ECG).\n` +
         `* 🔍 **Track your Appointment Status** (just enter your 4-digit number e.g. **#1042**).\n` +
+        `* 📋 **Preparation & Documents to Bring** for visits.\n` +
+        `* 🕒 **Hospital Visiting Hours & ICU Guidelines**.\n` +
         `* 🏥 **Discover Accredited Hospitals** & ICU Bed counts.\n` +
         `* 🚨 **24/7 Emergency Helplines** & ambulance dispatch.\n` +
         `* 💳 **Hospital Software Pricing & Demo Booking**.\n\n` +
-        `Please select one of the quick options below or tell me what you'd like to do!`,
+        `Please select one of the quick options below or ask your question!`,
       intent: 'general_fallback',
       quickReplies: [
-        '🩺 Book Doctor',
-        '🧪 Lab Tests & Prices',
-        '🔍 Track Appointment #',
-        '🚨 Emergency Contact',
-        '💬 Contact Support'
+        '🩺 How to Book',
+        '📋 What Documents to Bring',
+        '🧪 Fasting Guidelines for Tests',
+        '🕒 Hospital Visiting Hours',
+        '💰 Doctor Consultation Fees',
+        '🚨 Emergency Helplines'
       ]
     });
   } catch (error) {
@@ -479,9 +972,21 @@ const processChatMessage = async (req, res) => {
 // ─── Suggestions Endpoint ───────────────────────────────────────
 const getChatSuggestions = async (req, res) => {
   const suggestions = [
-    { title: 'Book Doctor Appointment', prompt: 'I want to book an appointment with a doctor', icon: '🩺' },
+    { title: 'How to Book Appointment', prompt: 'How do I book an appointment with a doctor?', icon: '🩺' },
+    { title: 'What Documents to Bring', prompt: 'What documents do I need to bring for my appointment?', icon: '📋' },
+    { title: 'Fasting for Blood Tests', prompt: 'Do I need to fast before a blood test?', icon: '🧪' },
+    { title: 'Full Body Health Checkups', prompt: 'What full body master health checkup packages do you offer?', icon: '💎' },
+    { title: 'Vaccination Schedules', prompt: 'Tell me about child and adult vaccination schedules', icon: '💉' },
+    { title: 'Maternity & Delivery Packages', prompt: 'What are the maternity and delivery packages?', icon: '🌸' },
+    { title: 'Home Blood Sample Collection', prompt: 'How can I book a blood test sample collection at home?', icon: '🏠' },
+    { title: 'Senior Citizen Care', prompt: 'What facilities and discounts are available for senior citizens?', icon: '👴' },
+    { title: 'Hospital Visiting Hours', prompt: 'What are the hospital visiting hours for patients?', icon: '🕒' },
+    { title: 'Doctor Consultation Fees', prompt: 'What are the doctor consultation fees by department?', icon: '💰' },
+    { title: 'Insurance & Cashless TPA', prompt: 'Do you accept health insurance and cashless Mediclaim?', icon: '🛡️' },
+    { title: 'Hospital Admission & Discharge', prompt: 'How does the hospital admission and discharge process work?', icon: '🛏️' },
+    { title: 'Physiotherapy & Rehab', prompt: 'What physiotherapy services are offered?', icon: '🏃' },
+    { title: 'Blood Donation & Blood Bank', prompt: 'How can I donate blood or check blood bank availability?', icon: '🩸' },
     { title: 'Track My Booking', prompt: 'Track my appointment status', icon: '🔍' },
-    { title: 'Explore Diagnostic Lab Tests', prompt: 'What lab tests and health checkups are available?', icon: '🧪' },
     { title: 'Emergency Helplines', prompt: 'What are the 24/7 emergency contact numbers?', icon: '🚨' },
     { title: 'Hospital Software Pricing', prompt: 'Tell me about hospital management subscription plans', icon: '💳' },
     { title: 'Cancellation & Refunds', prompt: 'How does the cancellation and refund process work?', icon: '🔄' }
