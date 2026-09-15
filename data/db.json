@@ -759,6 +759,20 @@
   ],
   "contacts": [
     {
+      "id": "gmail_1a0a3bd8a319172f",
+      "supa_id": "aea99279-c279-4973-9232-eb71be90a25e",
+      "name": "Canva",
+      "email": "start@engage.canva.com",
+      "subject": "You're a force for good",
+      "phone": "",
+      "message": "See how you change the world by designing with us ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏ ‌ ﻿ ͏",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-15T06:25:03.000Z",
+      "updated_at": "2026-09-15T08:18:51.242Z"
+    },
+    {
       "id": "gmail_1a0a31d78ec420d3",
       "supa_id": "814fddeb-b304-468d-85cb-15281e054eb2",
       "name": "Base44",
