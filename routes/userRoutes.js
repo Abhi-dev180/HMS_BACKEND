@@ -946,7 +946,9 @@ router.post('/verify-otp', authMiddleware, async (req, res) => {
 router.put('/profile', authMiddleware, async (req, res) => {
   const {
     name, contactName, email, mobile, phone,
-    hospital, hospitalName, city, address, beds, otpVerified
+    hospital, hospitalName, city, address, beds,
+    gender, bloodGroup, dob, age, emergencyContact,
+    specialty, emergency, department, otpVerified
   } = req.body;
   const userId = req.user.id;
 
@@ -980,6 +982,38 @@ router.put('/profile', authMiddleware, async (req, res) => {
   if (beds !== undefined && beds !== req.user.beds) {
     updates.beds = beds;
     changes.push('Beds');
+  }
+  if (gender !== undefined && gender !== req.user.gender) {
+    updates.gender = gender;
+    changes.push('Gender');
+  }
+  if (bloodGroup !== undefined && bloodGroup !== req.user.bloodGroup) {
+    updates.bloodGroup = bloodGroup;
+    changes.push('Blood Group');
+  }
+  if (dob !== undefined && dob !== req.user.dob) {
+    updates.dob = dob;
+    changes.push('Date of Birth');
+  }
+  if (age !== undefined && age !== req.user.age) {
+    updates.age = age;
+    changes.push('Age');
+  }
+  if (emergencyContact !== undefined && emergencyContact !== req.user.emergencyContact) {
+    updates.emergencyContact = emergencyContact;
+    changes.push('Emergency Contact');
+  }
+  if (specialty !== undefined && specialty !== req.user.specialty) {
+    updates.specialty = specialty;
+    changes.push('Specialty');
+  }
+  if (emergency !== undefined && emergency !== req.user.emergency) {
+    updates.emergency = emergency;
+    changes.push('Emergency');
+  }
+  if (department !== undefined && department !== req.user.department) {
+    updates.department = department;
+    changes.push('Department');
   }
 
   if (email !== undefined && email !== req.user.email) {
