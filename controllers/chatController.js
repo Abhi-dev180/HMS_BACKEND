@@ -501,27 +501,74 @@ const KNOWLEDGE_FAQS = [
   }
 ];
 
-// ─── Helper: Query Appointment by 4-digit number ────────────────
+// ─── Helper: Query Appointment by 4-digit number or ID ──────────
 const findAppointmentByNumber = async (appointmentNumber) => {
   const num = Number(appointmentNumber);
-  if (isNaN(num)) return null;
+  const strQuery = String(appointmentNumber).trim();
+  if (!strQuery) return null;
 
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      if (!isNaN(num)) {
+        const { data, error } = await supabase
+          .from('appointments')
+          .select('*')
+          .eq('appointment_number', num)
+          .maybeSingle();
+        if (!error && data) return data;
+      }
+      const { data: dataId, error: errId } = await supabase
         .from('appointments')
         .select('*')
-        .eq('appointment_number', num)
+        .eq('id', strQuery)
         .maybeSingle();
-      if (!error && data) return data;
+      if (!errId && dataId) return dataId;
     } catch (_) {}
   }
 
   const db = readDB();
   const found = (db.appointments || []).find(
-    (a) => Number(a.appointment_number) === num || String(a.id) === String(num)
+    (a) => (!isNaN(num) && Number(a.appointment_number) === num) || String(a.id) === strQuery
   );
   return found || null;
+};
+
+// ─── Helper: Query User's Recent Appointments ────────────────────
+const getUserAppointments = async (user) => {
+  if (user) {
+    const uid = String(user.id || '');
+    const uemail = String(user.email || '').trim().toLowerCase();
+    const uphone = String(user.mobile || user.phone || '').replace(/\D/g, '');
+
+    if (supabase) {
+      try {
+        if (uid) {
+          const { data } = await supabase.from('appointments').select('*').eq('userId', uid).order('date', { ascending: false }).limit(5);
+          if (data && data.length > 0) return data;
+        }
+        if (uemail) {
+          const { data } = await supabase.from('appointments').select('*').ilike('email', uemail).order('date', { ascending: false }).limit(5);
+          if (data && data.length > 0) return data;
+        }
+      } catch (_) {}
+    }
+
+    const db = readDB();
+    const userAppts = (db.appointments || []).filter((a) => {
+      const matchId = Boolean(uid && String(a.userId) === uid);
+      const matchEmail = Boolean(uemail && a.email && String(a.email).trim().toLowerCase() === uemail);
+      const matchPhone = Boolean(uphone && a.patientPhone && String(a.patientPhone).replace(/\D/g, '') === uphone);
+      return matchId || matchEmail || matchPhone;
+    });
+
+    if (userAppts.length > 0) {
+      return userAppts.sort((a, b) => new Date(`${b.date}T${b.time || '00:00'}`) - new Date(`${a.date}T${a.time || '00:00'}`));
+    }
+  }
+
+  // Fallback: If unauthenticated or no direct match, return latest appointments in system
+  const db = readDB();
+  return (db.appointments || []).slice(0, 3);
 };
 
 // ─── Helper: Query Hospitals from DB ────────────────────────────
@@ -559,59 +606,141 @@ const processChatMessage = async (req, res) => {
     const userName = user?.name ? user.name.split(' ')[0] : 'there';
 
     // ─────────────────────────────────────────────────────────────
-    // 1. APPOINTMENT TRACKING (Matches #1234, 1234, track appointment, check status)
+    // 1. APPOINTMENT TRACKING & STATUS (Matches #1234, 1234, track appointment, check booking, my appointment)
     // ─────────────────────────────────────────────────────────────
     const numMatch = text.match(/(?:#|appointment\s*#?|ticket\s*#?|tracking\s*#?|status\s*#?)?\b(\d{4})\b/i);
-    const isStatusIntent =
+    const isTrackingQuery = (
       lower.includes('track') ||
       lower.includes('status') ||
-      lower.includes('appointment number') ||
       lower.includes('check my booking') ||
-      lower.includes('where is my appointment');
+      lower.includes('check booking') ||
+      lower.includes('check appointment') ||
+      lower.includes('where is my appointment') ||
+      lower.includes('where is my booking') ||
+      lower.includes('show my booking') ||
+      lower.includes('show my appointment') ||
+      lower.includes('my appointment') ||
+      lower.includes('my booking') ||
+      lower.includes('my bookings') ||
+      lower.includes('booking detail') ||
+      lower.includes('appointment detail') ||
+      lower === 'track appointment' ||
+      lower === 'track my appointment' ||
+      lower === 'track'
+    );
 
-    if (numMatch && (isStatusIntent || text.length < 15 || lower.includes('appointment') || lower.includes('status'))) {
-      const apptNum = numMatch[1];
-      const appt = await findAppointmentByNumber(apptNum);
+    if (numMatch || isTrackingQuery) {
+      // 1A. User provided a specific 4-digit number
+      if (numMatch) {
+        const apptNum = numMatch[1];
+        const appt = await findAppointmentByNumber(apptNum);
 
-      if (appt) {
-        const isCancelled = appt.status === 'Cancelled';
-        const isCompleted = appt.status === 'Completed';
-        const statusEmoji = isCancelled ? '❌' : isCompleted ? '✅' : '⏳';
+        if (appt) {
+          const isCancelled = appt.status === 'Cancelled';
+          const isCompleted = appt.status === 'Completed';
+          const isConfirmed = appt.status === 'Confirmed';
+          const statusEmoji = isCancelled ? '❌' : isCompleted ? '✅' : isConfirmed ? '🟢' : '⏳';
 
-        const reply = `### ${statusEmoji} Appointment #${appt.appointment_number || appt.id} Details\n\n` +
-          `* **Patient Name:** ${appt.patientName || 'N/A'}\n` +
-          `* **Service / Type:** ${appt.serviceName || appt.appointmentType || 'Doctor Consultation'}\n` +
-          `* **Hospital:** ${appt.hospital || 'MEDPARK Hospital'}\n` +
-          `* **Scheduled Slot:** 📅 **${appt.date || 'N/A'}** at ⏰ **${appt.time || 'N/A'}**\n` +
-          `* **Booking Status:** **${appt.status || 'Pending'}**\n` +
-          `* **Payment Status:** ${String(appt.paymentStatus).toLowerCase() === 'paid' ? '💳 Paid (₹' + (appt.paymentAmount || 500) + ')' : '⏳ Unpaid'}\n` +
-          (isCancelled ? `\n> ℹ️ *Cancellation Reason: ${appt.cancellationReason || 'Cancelled by user'}* (Refund: ₹${appt.refundAmount || 0})` : '') +
-          `\n\nNeed to download your invoice or manage this booking?`;
+          const reply = `### ${statusEmoji} Appointment #${appt.appointment_number || appt.id} Details\n\n` +
+            `* 👤 **Patient Name:** ${appt.patientName || 'N/A'}\n` +
+            `* 🏥 **Hospital:** ${appt.hospital || 'MEDPARK Hospital'}\n` +
+            `* 🩺 **Service / Doctor:** ${appt.serviceName || appt.doctorName || appt.appointmentType || 'Doctor Consultation'}\n` +
+            `* 📅 **Scheduled Slot:** **${appt.date || 'N/A'}** at ⏰ **${appt.time || 'N/A'}**\n` +
+            `* 📊 **Booking Status:** **${appt.status || 'Pending'}**\n` +
+            `* 💳 **Payment Status:** ${String(appt.paymentStatus).toLowerCase() === 'paid' ? '💳 Paid (₹' + (appt.paymentAmount || appt.servicePrice || 500) + ')' : '⏳ Unpaid'}\n` +
+            (isCancelled ? `\n> ℹ️ *Cancellation Reason: ${appt.cancellationReason || 'Cancelled by user'}* (Refund: ₹${appt.refundAmount || 0} - ${appt.refundStatus || 'Refunded'})` : '') +
+            `\n\nYou can view full records, download the official tax invoice PDF, or manage this booking below:`;
+
+          return res.json({
+            reply,
+            intent: 'track_appointment',
+            appointment: appt,
+            quickReplies: [
+              'Download Invoice PDF',
+              'Book Another Appointment',
+              'Explore Diagnostic Tests',
+              'Contact Hospital Helpdesk'
+            ],
+            action: {
+              type: 'view_appointment',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number,
+              url: `/dashboard/my-appointments?id=${appt.id}`,
+              label: '📑 View in My Appointments'
+            }
+          });
+        } else {
+          return res.json({
+            reply: `🔍 I searched for appointment number **#${apptNum}**, but couldn't find an active record in our database.\n\n` +
+              `* Please ensure the 4-digit appointment number is correct.\n` +
+              `* If you booked recently, you can also view all your active bookings directly in [My Appointments](/dashboard/my-appointments).`,
+            intent: 'track_appointment_not_found',
+            quickReplies: ['View My Appointments', 'Book New Appointment', 'Talk to Support'],
+            action: {
+              type: 'view_appointments',
+              url: '/dashboard/my-appointments',
+              label: '📑 Open My Appointments'
+            }
+          });
+        }
+      }
+
+      // 1B. User asked to track their appointment without specifying a 4-digit number
+      const userAppts = await getUserAppointments(user);
+
+      if (userAppts && userAppts.length > 0) {
+        const latestAppt = userAppts[0];
+        const isCancelled = latestAppt.status === 'Cancelled';
+        const isCompleted = latestAppt.status === 'Completed';
+        const isConfirmed = latestAppt.status === 'Confirmed';
+        const statusEmoji = isCancelled ? '❌' : isCompleted ? '✅' : isConfirmed ? '🟢' : '⏳';
+
+        let otherList = '';
+        if (userAppts.length > 1) {
+          otherList = `\n\n📋 **Other Recent Bookings:**\n` +
+            userAppts.slice(1, 3).map((a) => `* 🎟️ **#${a.appointment_number || a.id}** — 📅 **${a.date} @ ${a.time}** (${a.status || 'Pending'})`).join('\n');
+        }
+
+        const reply = `### ${statusEmoji} Latest Appointment #${latestAppt.appointment_number || latestAppt.id} Details\n\n` +
+          `* 👤 **Patient Name:** ${latestAppt.patientName || 'N/A'}\n` +
+          `* 🏥 **Hospital:** ${latestAppt.hospital || 'MEDPARK Hospital'}\n` +
+          `* 🩺 **Service / Doctor:** ${latestAppt.serviceName || latestAppt.doctorName || latestAppt.appointmentType || 'Doctor Consultation'}\n` +
+          `* 📅 **Scheduled Slot:** **${latestAppt.date || 'N/A'}** at ⏰ **${latestAppt.time || 'N/A'}**\n` +
+          `* 📊 **Booking Status:** **${latestAppt.status || 'Pending'}**\n` +
+          `* 💳 **Payment Status:** ${String(latestAppt.paymentStatus).toLowerCase() === 'paid' ? '💳 Paid (₹' + (latestAppt.paymentAmount || latestAppt.servicePrice || 500) + ')' : '⏳ Unpaid'}\n` +
+          (isCancelled ? `\n> ℹ️ *Cancellation Reason: ${latestAppt.cancellationReason || 'Cancelled by user'}* (Refund: ₹${latestAppt.refundAmount || 0})` : '') +
+          otherList +
+          `\n\nWould you like to open this booking in your portal or download your invoice PDF?`;
+
+        const dynamicQuickReplies = userAppts.slice(0, 2).map((a) => `Track #${a.appointment_number || a.id}`)
+          .concat(['Download Invoice PDF', 'Book Another Appointment', 'Explore Hospitals']);
 
         return res.json({
           reply,
           intent: 'track_appointment',
-          appointment: appt,
-          quickReplies: [
-            'Book Another Appointment',
-            'Download Invoice PDF',
-            'Explore Diagnostic Tests',
-            'Contact Hospital Helpdesk'
-          ],
+          appointment: latestAppt,
+          quickReplies: dynamicQuickReplies,
           action: {
             type: 'view_appointment',
-            appointmentId: appt.id,
-            appointmentNumber: appt.appointment_number,
-            url: `/dashboard/my-appointments?id=${appt.id}`
+            appointmentId: latestAppt.id,
+            appointmentNumber: latestAppt.appointment_number,
+            url: `/dashboard/my-appointments?id=${latestAppt.id}`,
+            label: '📑 Open in My Appointments'
           }
         });
       } else {
         return res.json({
-          reply: `🔍 I searched for appointment number **#${apptNum}**, but couldn't find an active record in our system.\n\n` +
-            `* Please ensure the 4-digit appointment number is correct.\n` +
-            `* If you booked recently, check your confirmation email or log into your [My Appointments](/dashboard/my-appointments) portal.`,
-          intent: 'track_appointment_not_found',
-          quickReplies: ['Book New Appointment', 'View My Appointments', 'Talk to Support']
+          reply: `🔍 **Track Your Hospital Appointment or Diagnostic Test**\n\n` +
+            `To look up your appointment details in chat:\n\n` +
+            `* 🔢 **Reply with your 4-digit appointment reference number** (e.g. **\`#1042\`** or \`4849\`).\n` +
+            `* 📑 Or visit your [My Appointments](/dashboard/my-appointments) portal to view and manage all your scheduled consultations.`,
+          intent: 'track_appointment_prompt',
+          quickReplies: ['View My Appointments', 'Book Doctor Appointment', 'Contact Helpdesk'],
+          action: {
+            type: 'view_appointments',
+            url: '/dashboard/my-appointments',
+            label: '📑 Go to My Appointments'
+          }
         });
       }
     }
@@ -649,17 +778,18 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 4. BOOK APPOINTMENT INTENT
+    // 4. BOOK APPOINTMENT INTENT (Strictly checks for booking intention)
     // ─────────────────────────────────────────────────────────────
-    if (
+    const isBookingQuery = !isTrackingQuery && (
       lower.includes('book') ||
-      lower.includes('appointment') ||
-      lower.includes('consult') ||
+      lower.includes('reserve') ||
       lower.includes('schedule') ||
-      lower.includes('reserve slot') ||
+      lower.includes('see a doctor') ||
       lower.includes('doctor visit') ||
-      lower.includes('see a doctor')
-    ) {
+      (lower.includes('appointment') && !lower.includes('track') && !lower.includes('status') && !lower.includes('my appointment'))
+    );
+
+    if (isBookingQuery) {
       const slots = getDailyTimeSlots ? getDailyTimeSlots().slice(0, 6) : ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00'];
 
       return res.json({
@@ -681,7 +811,8 @@ const processChatMessage = async (req, res) => {
         ],
         action: {
           type: 'open_booking_modal',
-          url: '/dashboard/book-appointment'
+          url: '/dashboard/book-appointment',
+          label: '🩺 Book Appointment Now'
         }
       });
     }
