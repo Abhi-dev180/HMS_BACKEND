@@ -688,6 +688,108 @@ const calculateServiceFee = (specialty) => {
   return 500;
 };
 
+// ─── Helper: Query Available Time Slots (Excluding Already Booked Slots) ───
+const getAvailableTimeSlots = async (dateStr, hospitalId = null, hospitalName = null) => {
+  const allSlotTemplates = [
+    { time24: '09:00', label: '09:00 AM' },
+    { time24: '09:30', label: '09:30 AM' },
+    { time24: '10:00', label: '10:00 AM' },
+    { time24: '10:30', label: '10:30 AM' },
+    { time24: '11:00', label: '11:00 AM' },
+    { time24: '11:30', label: '11:30 AM' },
+    { time24: '12:00', label: '12:00 PM' },
+    { time24: '12:30', label: '12:30 PM' },
+    { time24: '14:00', label: '02:00 PM' },
+    { time24: '14:30', label: '02:30 PM' },
+    { time24: '15:00', label: '03:00 PM' },
+    { time24: '15:30', label: '03:30 PM' },
+    { time24: '16:00', label: '04:00 PM' },
+    { time24: '16:30', label: '04:30 PM' },
+    { time24: '17:00', label: '05:00 PM' }
+  ];
+
+  let bookedAppointments = [];
+
+  // Query Supabase if connected
+  if (supabase) {
+    try {
+      let query = supabase
+        .from('appointments')
+        .select('date, time, status, hospitalId, hospital')
+        .eq('date', dateStr)
+        .neq('status', 'Cancelled');
+
+      if (hospitalId && hospitalName) {
+        query = query.or(`hospitalId.eq.${hospitalId},hospital.eq.${hospitalName}`);
+      } else if (hospitalId) {
+        query = query.eq('hospitalId', hospitalId);
+      } else if (hospitalName) {
+        query = query.eq('hospital', hospitalName);
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        bookedAppointments = data;
+      }
+    } catch (_) {}
+  }
+
+  // Fallback & Merge with local db.json
+  const db = readDB();
+  const localBooked = (db.appointments || []).filter(a => {
+    if (a.date !== dateStr) return false;
+    if (a.status === 'Cancelled') return false;
+    if (hospitalId || hospitalName) {
+      const matchId = hospitalId && a.hospitalId && String(a.hospitalId) === String(hospitalId);
+      const matchName = hospitalName && a.hospital && a.hospital.toLowerCase() === hospitalName.toLowerCase();
+      return Boolean(matchId || matchName);
+    }
+    return true;
+  });
+
+  const allBooked = [...bookedAppointments, ...localBooked];
+
+  // Set of normalized booked times in 24h format (e.g. '09:00', '10:00', '14:00')
+  const bookedTimeSet = new Set();
+  allBooked.forEach(a => {
+    if (!a.time) return;
+    const rawTime = String(a.time).trim().toLowerCase();
+    const match = rawTime.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?/i);
+    if (match) {
+      let h = Number(match[1]);
+      const m = match[2];
+      const isPm = (match[3] || '').toLowerCase() === 'pm';
+      const isAm = (match[3] || '').toLowerCase() === 'am';
+      if (isPm && h < 12) h += 12;
+      if (isAm && h === 12) h = 0;
+      bookedTimeSet.add(`${String(h).padStart(2, '0')}:${m}`);
+    } else {
+      bookedTimeSet.add(rawTime);
+    }
+  });
+
+  // Filter out past times if date is today
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isToday = dateStr === todayStr;
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMin = now.getMinutes();
+
+  const available = allSlotTemplates.filter(s => {
+    if (bookedTimeSet.has(s.time24)) return false;
+    if (isToday) {
+      const [sh, sm] = s.time24.split(':').map(Number);
+      if (sh < currentHour || (sh === currentHour && sm <= currentMin)) return false;
+    }
+    return true;
+  });
+
+  return {
+    availableSlots: available,
+    bookedSlots: allSlotTemplates.filter(s => bookedTimeSet.has(s.time24)),
+    bookedCount: bookedTimeSet.size
+  };
+};
+
 // ─── Main Conversational Message Handler ────────────────────────
 const processChatMessage = async (req, res) => {
   try {
@@ -823,7 +925,8 @@ const processChatMessage = async (req, res) => {
           return res.json({
             reply: `🏥 **Step 2 of 4: Please choose your preferred hospital or clinic:**`,
             intent: 'booking_step_hospital',
-            quickReplies: [...topHosp, 'All Accredited Hospitals', '❌ Cancel Booking'],
+            hospitals,
+            quickReplies: [...topHosp, 'View More Hospitals 🏥', '❌ Cancel Booking'],
             context: { bookingState: { ...bookingState, step: 'hospital' } }
           });
         }
@@ -840,19 +943,54 @@ const processChatMessage = async (req, res) => {
           chosenDate = new Date(Date.now() + 86400000).toISOString().split('T')[0];
         }
 
-        const slotChips = ['09:00 AM', '10:00 AM', '11:30 AM', '02:00 PM', '03:30 PM', '05:00 PM'];
+        // Query available slots dynamically excluding already booked slots
+        const { availableSlots, bookedCount } = await getAvailableTimeSlots(
+          chosenDate,
+          bookingState.hospitalId,
+          bookingState.hospitalName
+        );
+
+        if (availableSlots.length === 0) {
+          return res.json({
+            reply: `📅 **Date Selected:** **${chosenDate}**\n` +
+              `🏥 **Hospital:** **${bookingState.hospitalName}**\n\n` +
+              `⚠️ **All appointment slots for ${chosenDate} are completely booked!**\n\n` +
+              `Please select another date with open availability below:`,
+            intent: 'booking_step_date_full',
+            quickReplies: [
+              `Tomorrow (${new Date(Date.now() + 86400000).toISOString().split('T')[0]})`,
+              new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
+              new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0],
+              '⬅️ Change Hospital',
+              '❌ Cancel Booking'
+            ],
+            context: {
+              bookingState: {
+                ...bookingState,
+                step: 'date'
+              }
+            }
+          });
+        }
+
+        const slotChips = availableSlots.map(s => s.label);
+        const bookedNote = bookedCount > 0 ? `\n> 🟢 *${availableSlots.length} open slots available (${bookedCount} already booked slot${bookedCount > 1 ? 's' : ''} excluded).*` : '';
 
         return res.json({
           reply: `📅 **Date Selected:** **${chosenDate}**\n` +
-            `🏥 **Hospital:** **${bookingState.hospitalName}**\n\n` +
-            `⏰ **Step 4 of 4: Please pick an available time slot:**`,
+            `🏥 **Hospital:** **${bookingState.hospitalName}**\n` +
+            `🩺 **Service:** **${bookingState.specialty}**\n\n` +
+            `⏰ **Step 4 of 4: Please choose an available time slot:**` +
+            bookedNote,
           intent: 'booking_step_time',
-          quickReplies: [...slotChips, '⬅️ Change Date', '❌ Cancel Booking'],
+          availableSlots: availableSlots,
+          quickReplies: [...slotChips.slice(0, 8), '⬅️ Change Date', '❌ Cancel Booking'],
           context: {
             bookingState: {
               ...bookingState,
               step: 'time',
-              date: chosenDate
+              date: chosenDate,
+              availableSlots: availableSlots.map(s => s.time24)
             }
           }
         });
@@ -884,16 +1022,62 @@ const processChatMessage = async (req, res) => {
           if (isPm && h < 12) h += 12;
           if (isAm && h === 12) h = 0;
           cleanTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        } else if (lower.includes('09') || lower.includes('9')) {
+        } else if (lower.includes('09:00') || lower.includes('9:00') || lower === '09:00 am' || lower === '9 am') {
           cleanTime = '09:00';
-        } else if (lower.includes('11')) {
+        } else if (lower.includes('09:30') || lower.includes('9:30')) {
+          cleanTime = '09:30';
+        } else if (lower.includes('10:00') || lower.includes('10 am')) {
+          cleanTime = '10:00';
+        } else if (lower.includes('10:30')) {
+          cleanTime = '10:30';
+        } else if (lower.includes('11:00') || lower.includes('11 am')) {
+          cleanTime = '11:00';
+        } else if (lower.includes('11:30')) {
           cleanTime = '11:30';
-        } else if (lower.includes('02') || lower.includes('2')) {
+        } else if (lower.includes('12:00') || lower.includes('12 pm')) {
+          cleanTime = '12:00';
+        } else if (lower.includes('12:30')) {
+          cleanTime = '12:30';
+        } else if (lower.includes('02:00') || lower.includes('2:00') || lower.includes('2 pm')) {
           cleanTime = '14:00';
-        } else if (lower.includes('03') || lower.includes('3')) {
+        } else if (lower.includes('02:30') || lower.includes('2:30')) {
+          cleanTime = '14:30';
+        } else if (lower.includes('03:00') || lower.includes('3:00') || lower.includes('3 pm')) {
+          cleanTime = '15:00';
+        } else if (lower.includes('03:30') || lower.includes('3:30')) {
           cleanTime = '15:30';
-        } else if (lower.includes('05') || lower.includes('5')) {
+        } else if (lower.includes('04:00') || lower.includes('4:00') || lower.includes('4 pm')) {
+          cleanTime = '16:00';
+        } else if (lower.includes('04:30') || lower.includes('4:30')) {
+          cleanTime = '16:30';
+        } else if (lower.includes('05:00') || lower.includes('5:00') || lower.includes('5 pm')) {
           cleanTime = '17:00';
+        }
+
+        // ─── VERIFY AVAILABILITY IN REAL-TIME (EXCLUDE TAKEN SLOTS) ───
+        const { availableSlots } = await getAvailableTimeSlots(
+          bookingState.date,
+          bookingState.hospitalId,
+          bookingState.hospitalName
+        );
+
+        const isSlotAvailable = availableSlots.some(s => s.time24 === cleanTime);
+
+        if (!isSlotAvailable) {
+          const validChips = availableSlots.map(s => s.label);
+          return res.json({
+            reply: `⚠️ **The slot at ${cleanTime} on ${bookingState.date} is already booked or unavailable.**\n\n` +
+              `Please select one of the open available time slots below:`,
+            intent: 'booking_step_time_retry',
+            availableSlots: availableSlots,
+            quickReplies: [...validChips.slice(0, 8), '⬅️ Change Date', '❌ Cancel Booking'],
+            context: {
+              bookingState: {
+                ...bookingState,
+                step: 'time'
+              }
+            }
+          });
         }
 
         const nextState = {
@@ -1126,35 +1310,94 @@ const processChatMessage = async (req, res) => {
 
         const statusEmoji = isPaid ? '🟢' : '⏳';
         const reply = `🎉 **Your Appointment is Successfully ${isPaid ? 'Booked & Paid' : 'Reserved'}!**\n\n` +
-          `### ${statusEmoji} Appointment #${savedAppt.appointment_number} ${isPaid ? 'Confirmed' : 'Reserved (Counter Payment)'}\n\n` +
+          `### ${statusEmoji} Appointment #${savedAppt.appointment_number} ${isPaid ? 'Confirmed & Paid' : 'Reserved (Counter Payment)'}\n\n` +
           `* 👤 **Patient Name:** ${savedAppt.patientName}\n` +
           `* 🏥 **Hospital:** ${savedAppt.hospital}\n` +
           `* 🩺 **Specialty / Doctor:** ${savedAppt.doctorName}\n` +
           `* 📅 **Scheduled Slot:** **${savedAppt.date}** at ⏰ **${savedAppt.time}**\n` +
           `* 📱 **Mobile:** ${savedAppt.patientPhone}\n` +
-          `* 📊 **Booking Status:** **${savedAppt.status}**\n` +
-          `* 💳 **Payment:** ${isPaid ? `💳 Paid via ${savedAppt.paymentMethod} (₹${savedAppt.paymentAmount})` : `💵 Unpaid — ₹${savedAppt.paymentAmount} payable at Hospital Counter`}\n\n` +
+          `* 💳 **Payment Mode:** ${savedAppt.paymentMethod}\n` +
+          `* 🆔 **Payment / Transaction ID:** \`${savedAppt.paymentId}\`\n` +
+          `* 💰 **Amount:** **₹${savedAppt.paymentAmount}** (${savedAppt.paymentStatus})\n\n` +
           (isPaid
-            ? `> 📧 An official booking confirmation and GST tax invoice PDF have been registered to your email.\n\n`
+            ? `> 📧 An official booking confirmation and GST tax invoice PDF have been registered to **${savedAppt.email}**.\n\n`
             : `> ℹ️ *Please arrive 15 minutes before your scheduled slot time to complete front desk check-in and payment.*\n\n`) +
-          `How else can I assist you today?`;
+          `👇 **What would you like to do next? Choose an option below:**`;
+
+        const paymentDetails = {
+          paymentId: savedAppt.paymentId,
+          paymentStatus: savedAppt.paymentStatus,
+          paymentAmount: savedAppt.paymentAmount,
+          paymentMethod: savedAppt.paymentMethod,
+          paidAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          invoiceUrl: `/api/appointments/${savedAppt.id}/invoice`,
+          appointmentNumber: savedAppt.appointment_number,
+          appointmentId: savedAppt.id,
+          patientName: savedAppt.patientName,
+          hospital: savedAppt.hospital,
+          doctorName: savedAppt.doctorName,
+          date: savedAppt.date,
+          time: savedAppt.time,
+          isPaid: isPaid
+        };
+
+        const nextOptions = [
+          {
+            id: 'download_invoice',
+            label: '📄 Download Tax Invoice (PDF)',
+            actionType: 'download_invoice',
+            url: `/api/appointments/${savedAppt.id}/invoice`,
+            description: 'Official GST tax invoice receipt'
+          },
+          {
+            id: 'view_portal',
+            label: '📑 View in My Appointments',
+            actionType: 'navigate',
+            url: `/dashboard/my-appointments?id=${savedAppt.id}`,
+            description: 'Open in patient portal'
+          },
+          {
+            id: 'docs_needed',
+            label: '📋 What Documents to Bring',
+            actionType: 'message',
+            text: 'What documents to bring for my appointment',
+            description: 'Photo ID, prior reports & records'
+          },
+          {
+            id: 'visiting_info',
+            label: '🕒 Hospital Visiting Hours & Helpline',
+            actionType: 'message',
+            text: 'Hospital visiting hours',
+            description: 'Timings, visitor passes & casualty'
+          },
+          {
+            id: 'book_another',
+            label: '🩺 Book Another Appointment / Lab Test',
+            actionType: 'message',
+            text: 'Book appointment',
+            description: 'Consult another doctor or test'
+          }
+        ];
 
         return res.json({
           reply,
           intent: 'appointment_booked_success',
           appointment: savedAppt,
+          paymentDetails,
+          nextOptions,
           quickReplies: [
-            'Download Invoice PDF',
-            `Track #${savedAppt.appointment_number}`,
+            '📄 Download Invoice PDF',
             '📋 What Documents to Bring',
-            'Book Another Appointment'
+            '🕒 Hospital Visiting Hours',
+            '🩺 Book Another Appointment',
+            `Track #${savedAppt.appointment_number}`
           ],
           action: {
-            type: 'view_appointment',
+            type: 'download_invoice',
             appointmentId: savedAppt.id,
             appointmentNumber: savedAppt.appointment_number,
-            url: `/dashboard/my-appointments?id=${savedAppt.id}`,
-            label: '📑 View in My Appointments'
+            url: `/api/appointments/${savedAppt.id}/invoice`,
+            label: '📄 Download Official Tax Invoice PDF'
           },
           context: { bookingState: null }
         });
@@ -1297,6 +1540,56 @@ const processChatMessage = async (req, res) => {
             url: '/dashboard/my-appointments',
             label: '📑 Go to My Appointments'
           }
+        });
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 1B. INVOICE & RECEIPT DOWNLOAD INTENT
+    // ─────────────────────────────────────────────────────────────
+    if (
+      lower.includes('download invoice') ||
+      lower.includes('invoice') ||
+      lower.includes('receipt') ||
+      lower.includes('tax invoice') ||
+      lower.includes('bill')
+    ) {
+      const invNumMatch = text.match(/(?:#|appointment\s*#?|ticket\s*#?|invoice\s*#?)?\b(\d{4})\b/i);
+      let appt = null;
+      if (invNumMatch) {
+        appt = await findAppointmentByNumber(invNumMatch[1]);
+      } else {
+        const userAppts = await getUserAppointments(user);
+        if (userAppts && userAppts.length > 0) appt = userAppts[0];
+      }
+
+      if (appt) {
+        const isPaid = String(appt.paymentStatus).toLowerCase() === 'paid';
+        return res.json({
+          reply: `📄 **GST Tax Invoice & Payment Receipt for Appointment #${appt.appointment_number || appt.id}**\n\n` +
+            `* 👤 **Patient:** ${appt.patientName || 'Patient'}\n` +
+            `* 🏥 **Hospital:** ${appt.hospital || 'MEDPARK Multi-Specialty Hospital'}\n` +
+            `* 🩺 **Service:** ${appt.serviceName || appt.doctorName || 'Consultation'}\n` +
+            `* 📅 **Slot:** **${appt.date}** @ ⏰ **${appt.time}**\n` +
+            `* 💳 **Payment Status:** ${isPaid ? '🟢 Paid' : '⏳ Counter Payment'}\n` +
+            `* 🆔 **Payment ID:** \`${appt.paymentId || 'N/A'}\`\n` +
+            `* 💰 **Amount:** **₹${appt.paymentAmount || appt.servicePrice || 500}**\n\n` +
+            `Click the button below to download or view your official GST invoice PDF:`,
+          intent: 'download_invoice',
+          appointment: appt,
+          action: {
+            type: 'download_invoice',
+            appointmentId: appt.id,
+            appointmentNumber: appt.appointment_number,
+            url: `/api/appointments/${appt.id}/invoice`,
+            label: `📄 Download Invoice PDF (#${appt.appointment_number || appt.id})`
+          },
+          quickReplies: [
+            `Track #${appt.appointment_number || appt.id}`,
+            '📋 What Documents to Bring',
+            'View My Appointments',
+            'Book Another Appointment'
+          ]
         });
       }
     }

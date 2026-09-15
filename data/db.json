@@ -3,6 +3,63 @@
   "hospitals": [],
   "appointments": [
     {
+      "id": "1789463270074",
+      "userId": null,
+      "hospitalId": "1786342149354",
+      "hospital": "Krishan Medical Store",
+      "doctorName": "Diagnostic Lab Test Specialist",
+      "date": "2026-09-17",
+      "time": "09:30",
+      "patientName": "John Doe",
+      "patientPhone": "9876543210",
+      "email": "user@yopmail.com",
+      "reason": "In-Chat Booking: Diagnostic Lab Test Consultation",
+      "appointmentType": "Lab Test",
+      "status": "Pending",
+      "source": "chat_bot",
+      "paymentStatus": "Unpaid (Pay at Hospital Counter)",
+      "paymentId": "COUNTER_1789463270074",
+      "paymentAmount": 500,
+      "paymentMethod": "Hospital Front Desk Counter",
+      "appointment_number": 3016,
+      "createdAt": "2026-09-15T09:07:50.074Z"
+    },
+    {
+      "id": "1789462688832",
+      "userId": null,
+      "hospitalId": "1786342149354",
+      "hospital": "Krishan Medical Store",
+      "doctorName": "Lab: Diagnostic Lab Test",
+      "date": "2026-09-17",
+      "time": "09:30",
+      "patientName": "John Doe",
+      "patientPhone": "9876543210",
+      "email": "user@yopmail.com",
+      "reason": "Diagnostic Test: Diagnostic Lab Test",
+      "petName": "",
+      "species": "",
+      "sex": "",
+      "breed": "",
+      "appointmentType": "Lab Test",
+      "serviceId": null,
+      "serviceName": "Diagnostic Lab Test",
+      "serviceCategory": null,
+      "servicePrice": 500,
+      "sampleType": null,
+      "fastingRequired": false,
+      "fastingDetails": "",
+      "turnaroundTime": "",
+      "status": "Pending",
+      "paymentStatus": "Paid",
+      "paymentId": "pi_3UFsCHLQib8WIljJ1DHdLtDl",
+      "paymentAmount": 500,
+      "paymentMethod": "Stripe Card",
+      "appointment_number": 1208,
+      "createdAt": "2026-09-15T08:58:08.832Z",
+      "stripe_session_id": "cs_test_a1r0jn9yJnCDQE5IZPeswVvih5KjIITC4Aw2hYV1vdzsuRJPdn2jLWz11k",
+      "updatedAt": "2026-09-15T08:58:44.703Z"
+    },
+    {
       "id": "1789461829693",
       "userId": "1788167124361",
       "hospitalId": "1",
@@ -932,6 +989,34 @@
     }
   ],
   "contacts": [
+    {
+      "id": "gmail_1a0a45dc5bc9c57a",
+      "supa_id": "29885def-fcbc-42a1-ad69-0b34e5b6f441",
+      "name": "Pinterest",
+      "email": "recommendations@discover.pinterest.com",
+      "subject": "Obsessed",
+      "phone": "",
+      "message": "You Need These Foods For Your Body You Need These Fo... You Need These Foods For Your Body See more Was this email useful? Yes No Based on your activity Help Center · Privacy Policy · Terms &amp;",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-15T09:20:00.000Z",
+      "updated_at": "2026-09-15T09:20:22.899Z"
+    },
+    {
+      "id": "gmail_1a0a456727d6d475",
+      "supa_id": "e747d0ca-59db-457e-880d-0f852754d246",
+      "name": "Website",
+      "email": "website@tollfreeforwarding.com",
+      "subject": "It is simpler than it sounds",
+      "phone": "",
+      "message": "Hi Raj, We hear this sometimes: setting up a phone system sounds like it should be complicated. New hardware, tech support, waiting for things to get configured. With TollFreeForwarding.com, none of",
+      "source": "support_email",
+      "status": "new",
+      "attachments": [],
+      "created_at": "2026-09-15T09:12:01.000Z",
+      "updated_at": "2026-09-15T09:12:22.444Z"
+    },
     {
       "id": "gmail_1a0a3bd8a319172f",
       "supa_id": "aea99279-c279-4973-9232-eb71be90a25e",
@@ -2194,5 +2279,6 @@
       "createdAt": "2026-09-02T08:52:13.409Z",
       "updatedAt": "2026-09-02T08:52:13.409Z"
     }
-  ]
+  ],
+  "deleted_contact_ids": []
 }
