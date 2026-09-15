@@ -624,28 +624,71 @@ const getHospitalList = async () => {
 const detectSpecialty = (msgStr) => {
   if (!msgStr) return null;
   const l = msgStr.toLowerCase();
+
+  // Lab Tests Detection
+  const labMatch = POPULAR_LAB_TESTS.find(t => t.name && l.includes(t.name.toLowerCase()));
+  if (labMatch) return labMatch.name;
+  if (l.includes('cbc') || l.includes('blood count')) return 'Complete Blood Count (CBC)';
+  if (l.includes('lipid') || l.includes('cholesterol')) return 'Lipid Profile';
+  if (l.includes('thyroid') || l.includes('tsh')) return 'Thyroid Profile (T3, T4, TSH)';
+  if (l.includes('liver') || l.includes('lft')) return 'Liver Function Test (LFT)';
+  if (l.includes('kidney') || l.includes('kft') || l.includes('creatinine')) return 'Kidney Function Test (KFT)';
+  if (l.includes('sugar') || l.includes('glucose') || l.includes('diabetes test') || l.includes('hba1c')) return 'HbA1c & Fasting Blood Sugar';
+  if (l.includes('vitamin d') || l.includes('vitamin b12') || l.includes('vitamin')) return 'Vitamin D3 & B12 Combo';
+  if (l.includes('ecg') || l.includes('electrocardiogram')) return '12-Lead ECG';
+  if (l.includes('x-ray') || l.includes('xray')) return 'Digital Chest X-Ray';
+  if (l.includes('ultrasound') || l.includes('usg') || l.includes('sonography')) return 'Ultrasound Abdomen & Pelvis';
+  if (l.includes('urine') || l.includes('urinalysis')) return 'Urine Routine & Microscopic';
+  if (l.includes('blood test') || l.includes('lab test') || l.includes('diagnostic')) return 'Diagnostic Lab Test';
+
+  // Specialties Detection
   if (l.includes('cardio') || l.includes('heart')) return 'Cardiology';
   if (l.includes('neuro') || l.includes('brain') || l.includes('spine')) return 'Neurology';
   if (l.includes('ortho') || l.includes('bone') || l.includes('joint') || l.includes('fracture')) return 'Orthopedics';
   if (l.includes('pediatric') || l.includes('child') || l.includes('baby')) return 'Pediatrics';
   if (l.includes('derma') || l.includes('skin')) return 'Dermatology';
   if (l.includes('gynec') || l.includes('women') || l.includes('maternity') || l.includes('pregnancy')) return 'Gynecology & Obstetrics';
-  if (l.includes('general') || l.includes('physician') || l.includes('fever') || l.includes('medicine')) return 'General Medicine';
+  if (l.includes('dental') || l.includes('tooth') || l.includes('dentist')) return 'Dental Care';
   if (l.includes('eye') || l.includes('cataract') || l.includes('vision') || l.includes('ophthal')) return 'Ophthalmology';
-  if (l.includes('dental') || l.includes('tooth') || l.includes('dentist') || l.includes('rct')) return 'Dental Care';
-  if (l.includes('physio') || l.includes('rehab')) return 'Physiotherapy';
-  if (l.includes('blood') || l.includes('lab') || l.includes('test') || l.includes('cbc') || l.includes('lipid') || l.includes('thyroid') || l.includes('hba1c')) return 'Diagnostic Lab Test';
+  if (l.includes('general') || l.includes('physician') || l.includes('fever') || l.includes('medicine')) return 'General Medicine';
   return null;
+};
+
+// ─── Helper: Calculate Service / Consultation Fee ─────────────
+const calculateServiceFee = (specialty) => {
+  if (!specialty) return 500;
+  const specLower = specialty.toLowerCase();
+  const labMatch = POPULAR_LAB_TESTS.find(t => (t.name && specLower.includes(t.name.toLowerCase())) || (t.category && specLower.includes(t.category.toLowerCase())));
+  if (labMatch) return labMatch.price;
+  if (specLower.includes('cbc') || specLower.includes('blood count')) return 350;
+  if (specLower.includes('lipid')) return 750;
+  if (specLower.includes('thyroid')) return 650;
+  if (specLower.includes('liver') || specLower.includes('lft')) return 850;
+  if (specLower.includes('kidney') || specLower.includes('kft')) return 800;
+  if (specLower.includes('hba1c') || specLower.includes('sugar')) return 500;
+  if (specLower.includes('vitamin')) return 1400;
+  if (specLower.includes('ecg')) return 400;
+  if (specLower.includes('x-ray') || specLower.includes('xray')) return 600;
+  if (specLower.includes('ultrasound') || specLower.includes('usg')) return 1200;
+  if (specLower.includes('urine')) return 200;
+  if (specLower.includes('cardio') || specLower.includes('heart')) return 800;
+  if (specLower.includes('neuro') || specLower.includes('brain')) return 1000;
+  if (specLower.includes('ortho') || specLower.includes('bone')) return 700;
+  if (specLower.includes('derma') || specLower.includes('skin')) return 600;
+  if (specLower.includes('gynec') || specLower.includes('women')) return 600;
+  if (specLower.includes('pediatric') || specLower.includes('child')) return 500;
+  if (specLower.includes('dental') || specLower.includes('tooth')) return 500;
+  return 500;
 };
 
 // ─── Main Conversational Message Handler ────────────────────────
 const processChatMessage = async (req, res) => {
   try {
-    const { message = '', context = {}, history = [] } = req.body || {};
+    const { message = '', context = {}, history = [], paymentInfo = null } = req.body || {};
     const text = String(message).trim();
     const lower = text.toLowerCase();
 
-    if (!text) {
+    if (!text && !paymentInfo) {
       return res.status(400).json({ message: 'Message content is required' });
     }
 
@@ -842,9 +885,9 @@ const processChatMessage = async (req, res) => {
               `* 👤 **Patient Name:** ${user.name}\n` +
               `* 📱 **Mobile:** ${userPhone}\n` +
               `* 📧 **Email:** ${user.email || 'patient@medpark.com'}\n\n` +
-              `Click **"✅ Confirm Booking"** below to book instantly, or reply with a different patient name and phone number (e.g. *"Rahul Sharma, 9876543210"*):`,
+              `Click **"✅ Confirm Details"** below to proceed to payment options, or reply with a different patient name and phone number (e.g. *"Rahul Sharma, 9876543210"*):`,
             intent: 'booking_step_confirm',
-            quickReplies: ['✅ Confirm Booking', 'Book for Family Member', '❌ Cancel Booking'],
+            quickReplies: ['✅ Confirm Details', 'Book for Family Member', '❌ Cancel Booking'],
             context: {
               bookingState: {
                 ...nextState,
@@ -870,7 +913,7 @@ const processChatMessage = async (req, res) => {
       }
 
       // ----------------------------------------------------
-      // STEP 5: Patient Details & Final DB Booking
+      // STEP 5: Patient Details ➜ Present Payment Options
       // ----------------------------------------------------
       if (bookingState.step === 'patient_details' || bookingState.step === 'confirm') {
         let patientName = bookingState.patientName || '';
@@ -878,7 +921,7 @@ const processChatMessage = async (req, res) => {
         let patientEmail = bookingState.email || user?.email || 'patient@medpark.com';
 
         // Check if user confirmed directly or provided new details
-        if (lower.includes('confirm') || lower === 'yes' || lower === 'book now' || lower === '✅ confirm booking') {
+        if (lower.includes('confirm') || lower === 'yes' || lower === 'book now' || lower === '✅ confirm details' || lower === '✅ confirm booking') {
           if (!patientName) patientName = user?.name || 'Valued Patient';
           if (!patientPhone) patientPhone = user?.mobile || user?.phone || '9876543210';
         } else {
@@ -893,9 +936,104 @@ const processChatMessage = async (req, res) => {
           }
         }
 
+        const fee = calculateServiceFee(bookingState.specialty);
+        const serviceTitle = bookingState.specialty || 'Doctor Consultation';
+
+        return res.json({
+          reply: `📋 **Appointment Summary:**\n\n` +
+            `* 👤 **Patient:** ${patientName} (${patientPhone})\n` +
+            `* 🏥 **Hospital:** ${bookingState.hospitalName}\n` +
+            `* 🩺 **Service:** ${serviceTitle}\n` +
+            `* 📅 **Scheduled Slot:** **${bookingState.date}** at ⏰ **${bookingState.time}**\n` +
+            `* 💰 **Consultation / Test Fee:** **₹${fee}**\n\n` +
+            `💳 **Step 5 of 5: Choose Your Preferred Payment Option:**\n\n` +
+            `1. 💳 **Pay Online Payment Gateway** *(Cards, Stripe, Razorpay UPI, Net Banking)*\n` +
+            `2. 📱 **Instant UPI QR Code** *(Google Pay, PhonePe, Paytm)*\n` +
+            `3. 🏥 **Pay at Hospital Front Desk** *(Cash / Card on arrival)*\n\n` +
+            `👉 Click **"💳 Pay Online (₹${fee})"** below to open the secure payment checkout, or select **"🏥 Pay at Hospital Counter"**:`,
+          intent: 'booking_step_payment_choice',
+          quickReplies: [
+            `💳 Pay Online Gateway (₹${fee})`,
+            `📱 Instant UPI QR`,
+            `🏥 Pay at Hospital Counter`,
+            `❌ Cancel Booking`
+          ],
+          action: {
+            type: 'open_payment_modal',
+            label: `💳 Pay Online Gateway (₹${fee})`,
+            bookingData: {
+              patientName,
+              patientPhone,
+              email: patientEmail,
+              hospitalId: bookingState.hospitalId || '1',
+              hospitalName: bookingState.hospitalName,
+              specialty: bookingState.specialty,
+              serviceName: serviceTitle,
+              date: bookingState.date,
+              time: bookingState.time,
+              amount: fee
+            }
+          },
+          context: {
+            bookingState: {
+              ...bookingState,
+              step: 'payment_choice',
+              patientName,
+              patientPhone,
+              email: patientEmail,
+              fee
+            }
+          }
+        });
+      }
+
+      // ----------------------------------------------------
+      // STEP 6: Execute Booking with Payment Choice
+      // ----------------------------------------------------
+      if (bookingState.step === 'payment_choice' || paymentInfo) {
+        const fee = bookingState.fee || calculateServiceFee(bookingState.specialty);
+        let patientName = bookingState.patientName || user?.name || 'Valued Patient';
+        let patientPhone = bookingState.patientPhone || user?.mobile || user?.phone || '9876543210';
+        let patientEmail = bookingState.email || user?.email || 'patient@medpark.com';
+
+        const isCounterPayment = lower.includes('counter') || lower.includes('hospital') || lower.includes('cash') || lower.includes('offline') || lower.includes('desk');
+        const isOnlinePayment = Boolean(paymentInfo) || lower.includes('paid') || lower.includes('verified') || lower.includes('stripe') || lower.includes('razorpay') || lower.includes('utr') || lower.includes('card');
+
+        // If user explicitly asks to open payment modal again
+        if (lower.includes('pay online') || lower.includes('online gateway') || (lower.includes('upi qr') && !isOnlinePayment)) {
+          return res.json({
+            reply: `💳 **Opening Secure Payment Checkout...**\n\nPlease complete your payment of **₹${fee}** via Stripe Card, Razorpay UPI, or Free UPI QR in the window that appears:`,
+            intent: 'booking_step_payment_modal_opened',
+            quickReplies: [`🏥 Pay at Hospital Counter Instead`, `❌ Cancel Booking`],
+            action: {
+              type: 'open_payment_modal',
+              label: `💳 Pay Online Gateway (₹${fee})`,
+              bookingData: {
+                patientName,
+                patientPhone,
+                email: patientEmail,
+                hospitalId: bookingState.hospitalId || '1',
+                hospitalName: bookingState.hospitalName,
+                specialty: bookingState.specialty,
+                serviceName: bookingState.specialty || 'Doctor Consultation',
+                date: bookingState.date,
+                time: bookingState.time,
+                amount: fee
+              }
+            },
+            context: {
+              bookingState
+            }
+          });
+        }
+
         // Generate unique 4-digit appointment number
         const appointmentNumber = await generateAppointmentNumber();
         const appointmentId = Date.now().toString();
+
+        const isPaid = !isCounterPayment;
+        const paymentMethodStr = paymentInfo?.paymentMethod || (isCounterPayment ? 'Hospital Front Desk Counter' : 'Online Payment Gateway');
+        const paymentIdStr = paymentInfo?.paymentId || (isCounterPayment ? `COUNTER_${Date.now()}` : `PAY_GATEWAY_${Date.now()}`);
 
         const appointment = {
           id: appointmentId,
@@ -905,16 +1043,17 @@ const processChatMessage = async (req, res) => {
           doctorName: `${bookingState.specialty || 'General'} Specialist`,
           date: bookingState.date || new Date(Date.now() + 86400000).toISOString().split('T')[0],
           time: bookingState.time || '10:00',
-          patientName: patientName || 'Patient',
-          patientPhone: patientPhone || '9876543210',
+          patientName: patientName,
+          patientPhone: patientPhone,
           email: patientEmail,
           reason: `In-Chat Booking: ${bookingState.specialty || 'Medical'} Consultation`,
           appointmentType: (bookingState.specialty || '').toLowerCase().includes('lab') ? 'Lab Test' : 'Consult',
-          status: 'Confirmed',
+          status: isPaid ? 'Confirmed' : 'Pending',
           source: 'chat_bot',
-          paymentStatus: 'Paid',
-          paymentAmount: 500,
-          paymentMethod: 'In-Chat Instant Booking',
+          paymentStatus: isPaid ? 'Paid' : 'Unpaid (Pay at Hospital Counter)',
+          paymentId: paymentIdStr,
+          paymentAmount: fee,
+          paymentMethod: paymentMethodStr,
           appointment_number: appointmentNumber,
           createdAt: new Date().toISOString()
         };
@@ -960,17 +1099,20 @@ const processChatMessage = async (req, res) => {
           broadcast('appointment_created', savedAppt);
         } catch (_) {}
 
-        const reply = `🎉 **Your Appointment is Successfully Booked!**\n\n` +
-          `### 🟢 Appointment #${savedAppt.appointment_number} Confirmed\n\n` +
+        const statusEmoji = isPaid ? '🟢' : '⏳';
+        const reply = `🎉 **Your Appointment is Successfully ${isPaid ? 'Booked & Paid' : 'Reserved'}!**\n\n` +
+          `### ${statusEmoji} Appointment #${savedAppt.appointment_number} ${isPaid ? 'Confirmed' : 'Reserved (Counter Payment)'}\n\n` +
           `* 👤 **Patient Name:** ${savedAppt.patientName}\n` +
           `* 🏥 **Hospital:** ${savedAppt.hospital}\n` +
           `* 🩺 **Specialty / Doctor:** ${savedAppt.doctorName}\n` +
           `* 📅 **Scheduled Slot:** **${savedAppt.date}** at ⏰ **${savedAppt.time}**\n` +
           `* 📱 **Mobile:** ${savedAppt.patientPhone}\n` +
-          `* 📊 **Status:** **Confirmed**\n` +
-          `* 💳 **Payment:** 💳 Paid (₹${savedAppt.paymentAmount})\n\n` +
-          `> 📧 An official booking confirmation and tax invoice PDF have been registered to your account.\n\n` +
-          `How else can I help you today?`;
+          `* 📊 **Booking Status:** **${savedAppt.status}**\n` +
+          `* 💳 **Payment:** ${isPaid ? `💳 Paid via ${savedAppt.paymentMethod} (₹${savedAppt.paymentAmount})` : `💵 Unpaid — ₹${savedAppt.paymentAmount} payable at Hospital Counter`}\n\n` +
+          (isPaid
+            ? `> 📧 An official booking confirmation and GST tax invoice PDF have been registered to your email.\n\n`
+            : `> ℹ️ *Please arrive 15 minutes before your scheduled slot time to complete front desk check-in and payment.*\n\n`) +
+          `How else can I assist you today?`;
 
         return res.json({
           reply,
