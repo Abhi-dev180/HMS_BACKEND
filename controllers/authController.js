@@ -41,8 +41,10 @@ const publicUser = (u, sub = null) => {
   const status = isExpired ? 'expired' : 'active';
 
   return {
-    id: u.id, name: u.name || '', email: u.email, mobile: u.mobile || '',
-    role: u.role, hospital: u.hospital || '', hospitalId: u.hospitalId || '',
+    id: u.id, name: u.name || '', email: u.email, mobile: u.mobile || u.phone || '',
+    role: u.role, hospital: u.hospital || u.hospital_name || '', hospitalId: u.hospitalId || u.hospital_id || '',
+    city: u.city || '', address: u.address || '', beds: u.beds || '',
+    contactName: u.contact_name || u.name || '',
     active: u.active !== false,
     planKey,
     planStart: sub?.start_date || u.plan_start || u.planStart || null,

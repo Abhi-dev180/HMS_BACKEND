@@ -770,31 +770,39 @@ const getProfileHandler = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Resolve hospital if not set
-    if (!userRecord.hospital && userRecord.email) {
+    // Resolve hospital, city, address, beds from registrations or hospitals if missing
+    if (userRecord.email) {
       if (supabase) {
         try {
           const { data: reg } = await supabase
             .from('registrations')
-            .select('hospital_name, hospital')
+            .select('hospital_name, contact_name, phone, city, address, beds')
             .eq('email', userRecord.email)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
-          if (reg?.hospital_name || reg?.hospital) {
-            userRecord.hospital = reg.hospital_name || reg.hospital;
+          if (reg) {
+            if (!userRecord.hospital && reg.hospital_name) userRecord.hospital = reg.hospital_name;
+            if (!userRecord.city && reg.city) userRecord.city = reg.city;
+            if (!userRecord.address && reg.address) userRecord.address = reg.address;
+            if (!userRecord.beds && reg.beds) userRecord.beds = reg.beds;
+            if (!userRecord.contact_name && reg.contact_name) userRecord.contact_name = reg.contact_name;
           }
         } catch (_) {}
 
-        if (!userRecord.hospital) {
+        if (!userRecord.hospital || !userRecord.city || !userRecord.address || !userRecord.beds) {
           try {
             const { data: hosp } = await supabase
               .from('hospitals')
-              .select('name')
+              .select('name, location, beds, contact')
               .or(`admin_email.eq.${userRecord.email},email.eq.${userRecord.email}`)
               .limit(1)
               .maybeSingle();
-            if (hosp?.name) userRecord.hospital = hosp.name;
+            if (hosp) {
+              if (!userRecord.hospital && hosp.name) userRecord.hospital = hosp.name;
+              if (!userRecord.address && hosp.location) userRecord.address = hosp.location;
+              if (!userRecord.beds && hosp.beds) userRecord.beds = hosp.beds;
+            }
           } catch (_) {}
         }
 
@@ -802,26 +810,32 @@ const getProfileHandler = async (req, res) => {
           try {
             const { data: demo } = await supabase
               .from('demo_bookings')
-              .select('hospital_name')
+              .select('hospital_name, city')
               .eq('email', userRecord.email)
               .order('created_at', { ascending: false })
               .limit(1)
               .maybeSingle();
-            if (demo?.hospital_name) userRecord.hospital = demo.hospital_name;
+            if (demo) {
+              if (demo.hospital_name) userRecord.hospital = demo.hospital_name;
+              if (!userRecord.city && demo.city) userRecord.city = demo.city;
+            }
           } catch (_) {}
         }
       }
 
-      if (!userRecord.hospital) {
-        const db = readDB();
-        const reg = (db.registrations || []).find((r) => r.email === userRecord.email);
-        if (reg?.hospital_name || reg?.hospital) {
-          userRecord.hospital = reg.hospital_name || reg.hospital;
-        }
-        const hosp = (db.hospitals || []).find((h) => h.admin_email === userRecord.email || h.email === userRecord.email);
-        if (hosp?.name) {
-          userRecord.hospital = hosp.name;
-        }
+      const db = readDB();
+      const reg = (db.registrations || []).find((r) => r.email === userRecord.email);
+      if (reg) {
+        if (!userRecord.hospital && reg.hospital_name) userRecord.hospital = reg.hospital_name;
+        if (!userRecord.city && reg.city) userRecord.city = reg.city;
+        if (!userRecord.address && reg.address) userRecord.address = reg.address;
+        if (!userRecord.beds && reg.beds) userRecord.beds = reg.beds;
+      }
+      const hosp = (db.hospitals || []).find((h) => h.admin_email === userRecord.email || h.email === userRecord.email);
+      if (hosp) {
+        if (!userRecord.hospital && hosp.name) userRecord.hospital = hosp.name;
+        if (!userRecord.address && hosp.location) userRecord.address = hosp.location;
+        if (!userRecord.beds && hosp.beds) userRecord.beds = hosp.beds;
       }
     }
 
@@ -930,33 +944,58 @@ router.post('/verify-otp', authMiddleware, async (req, res) => {
 
 // ─── Update Profile ──────────────────────────────────────────
 router.put('/profile', authMiddleware, async (req, res) => {
-  const { name, email, mobile, otpVerified } = req.body;
+  const {
+    name, contactName, email, mobile, phone,
+    hospital, hospitalName, city, address, beds, otpVerified
+  } = req.body;
   const userId = req.user.id;
+
+  const finalName = (name !== undefined ? name : contactName);
+  const finalMobile = (mobile !== undefined ? mobile : phone);
+  const finalHospital = (hospital !== undefined ? hospital : hospitalName);
 
   const updates = {};
   const changes = [];
 
-  if (name !== undefined && name !== req.user.name) {
-    updates.name = name;
+  if (finalName !== undefined && finalName !== req.user.name) {
+    updates.name = finalName;
     changes.push('Name');
   }
-  if (mobile !== undefined && mobile !== req.user.mobile) {
-    updates.mobile = mobile;
+  if (finalMobile !== undefined && finalMobile !== req.user.mobile) {
+    updates.mobile = finalMobile;
     changes.push('Mobile');
+  }
+  if (finalHospital !== undefined && finalHospital !== req.user.hospital) {
+    updates.hospital = finalHospital;
+    changes.push('Hospital');
+  }
+  if (city !== undefined && city !== req.user.city) {
+    updates.city = city;
+    changes.push('City');
+  }
+  if (address !== undefined && address !== req.user.address) {
+    updates.address = address;
+    changes.push('Address');
+  }
+  if (beds !== undefined && beds !== req.user.beds) {
+    updates.beds = beds;
+    changes.push('Beds');
   }
 
   if (email !== undefined && email !== req.user.email) {
     // Check if email already taken
-    const { data: existing, error: checkError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .neq('id', userId)
-      .maybeSingle();
+    if (supabase) {
+      const { data: existing, error: checkError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', email)
+        .neq('id', userId)
+        .maybeSingle();
 
-    if (checkError) throw checkError;
-    if (existing) {
-      return res.status(409).json({ message: 'Email already in use' });
+      if (checkError) throw checkError;
+      if (existing) {
+        return res.status(409).json({ message: 'Email already in use' });
+      }
     }
 
     if (!otpVerified) {
@@ -971,28 +1010,82 @@ router.put('/profile', authMiddleware, async (req, res) => {
   }
 
   try {
-    const { data, error } = await supabase
-      .from('users')
-      .update(updates)
-      .eq('id', userId)
-      .select('id, name, email, mobile, role, hospital')
-      .single();
+    let data = null;
+    if (supabase) {
+      const { data: updated, error } = await supabase
+        .from('users')
+        .update(updates)
+        .eq('id', userId)
+        .select('*')
+        .single();
 
-    if (error) throw error;
+      if (error) {
+        console.warn('[userRoutes] Supabase update error, falling back to local:', error.message);
+      } else {
+        data = updated;
+      }
+    }
+
+    const { readDB, writeDB } = require('../models');
+    const db = readDB();
+    const userIndex = (db.users || []).findIndex((u) => String(u.id) === String(userId));
+    if (userIndex !== -1) {
+      db.users[userIndex] = { ...db.users[userIndex], ...updates };
+      if (!data) data = db.users[userIndex];
+    }
+
+    // Sync registrations table if email matched
+    const targetEmail = req.user.email;
+    if (supabase) {
+      const regUpdates = {};
+      if (updates.hospital) regUpdates.hospital_name = updates.hospital;
+      if (updates.name) regUpdates.contact_name = updates.name;
+      if (updates.mobile) regUpdates.phone = updates.mobile;
+      if (updates.city) regUpdates.city = updates.city;
+      if (updates.address) regUpdates.address = updates.address;
+      if (updates.beds) regUpdates.beds = updates.beds;
+      if (updates.email) regUpdates.email = updates.email;
+
+      if (Object.keys(regUpdates).length > 0) {
+        await supabase
+          .from('registrations')
+          .update(regUpdates)
+          .or(`email.eq.${targetEmail},admin_user_id.eq.${userId}`);
+      }
+    }
+
+    // Sync hospitals table if admin
+    if (supabase && (updates.hospital || updates.address || updates.beds || updates.mobile)) {
+      const hospUpdates = {};
+      if (updates.hospital) hospUpdates.name = updates.hospital;
+      if (updates.address) hospUpdates.location = updates.address;
+      if (updates.beds) hospUpdates.beds = updates.beds;
+      if (updates.mobile) hospUpdates.contact = updates.mobile;
+
+      await supabase
+        .from('hospitals')
+        .update(hospUpdates)
+        .or(`admin_email.eq.${targetEmail},email.eq.${targetEmail}`);
+    }
+
+    writeDB(db);
+
+    const subscription = await getLatestSubscription(userId);
+    const fullUser = publicUser(data || { ...req.user, ...updates }, subscription);
 
     // ─── Send confirmation email ────────────────────────────
-    const finalEmail = data.email || req.user.email;
+    const finalEmail = fullUser.email || req.user.email;
     await sendProfileUpdatedEmail({
       to: finalEmail,
-      name: data.name || req.user.name,
+      name: fullUser.name || req.user.name,
       changes: changes.join(', '),
       updatedAt: new Date().toISOString()
-    }).catch(err => console.error('[userRoutes] profile update email failed:', err));
+    }).catch((err) => console.error('[userRoutes] profile update email failed:', err));
 
-    res.json({ user: data });
+    return res.json({ user: fullUser, subscription, message: 'Profile updated successfully' });
   } catch (err) {
     console.error('[userRoutes] update error:', err);
-    res.status(500).json({ message: 'Failed to update profile', error: err.message });
+    return res.status(500).json({ message: 'Failed to update profile', error: err.message });
   }
 });
 
