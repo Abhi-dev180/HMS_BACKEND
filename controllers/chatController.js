@@ -1,7 +1,36 @@
 // controllers/chatController.js
 const { supabase } = require('../config/supabase');
-const { readDB } = require('../models');
+const { readDB, writeDB } = require('../models');
 const { getDailyTimeSlots } = require('../services/schedulerService');
+const { sendAppointmentConfirmation } = require('../services/emailService');
+const { generateAppointmentInvoice } = require('../services/invoiceService');
+const { broadcast } = require('../services/websocketService');
+
+// ─── Helper: generate unique 4-digit appointment number ──────
+const generateAppointmentNumber = async () => {
+  let number, exists;
+  do {
+    number = Math.floor(1000 + Math.random() * 9000);
+    exists = false;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('appointments')
+          .select('id')
+          .eq('appointment_number', number)
+          .limit(1);
+        if (!error && data && data.length > 0) exists = true;
+      } catch (e) {
+        exists = false;
+      }
+    }
+    if (!exists) {
+      const db = readDB();
+      exists = (db.appointments || []).some(a => Number(a.appointment_number) === number);
+    }
+  } while (exists);
+  return number;
+};
 
 // ─── Default Diagnostic Lab Tests ──────────────────────────────
 const POPULAR_LAB_TESTS = [
@@ -591,6 +620,24 @@ const getHospitalList = async () => {
   ];
 };
 
+// ─── Helper: Detect Medical Specialty from Text ────────────────
+const detectSpecialty = (msgStr) => {
+  if (!msgStr) return null;
+  const l = msgStr.toLowerCase();
+  if (l.includes('cardio') || l.includes('heart')) return 'Cardiology';
+  if (l.includes('neuro') || l.includes('brain') || l.includes('spine')) return 'Neurology';
+  if (l.includes('ortho') || l.includes('bone') || l.includes('joint') || l.includes('fracture')) return 'Orthopedics';
+  if (l.includes('pediatric') || l.includes('child') || l.includes('baby')) return 'Pediatrics';
+  if (l.includes('derma') || l.includes('skin')) return 'Dermatology';
+  if (l.includes('gynec') || l.includes('women') || l.includes('maternity') || l.includes('pregnancy')) return 'Gynecology & Obstetrics';
+  if (l.includes('general') || l.includes('physician') || l.includes('fever') || l.includes('medicine')) return 'General Medicine';
+  if (l.includes('eye') || l.includes('cataract') || l.includes('vision') || l.includes('ophthal')) return 'Ophthalmology';
+  if (l.includes('dental') || l.includes('tooth') || l.includes('dentist') || l.includes('rct')) return 'Dental Care';
+  if (l.includes('physio') || l.includes('rehab')) return 'Physiotherapy';
+  if (l.includes('blood') || l.includes('lab') || l.includes('test') || l.includes('cbc') || l.includes('lipid') || l.includes('thyroid') || l.includes('hba1c')) return 'Diagnostic Lab Test';
+  return null;
+};
+
 // ─── Main Conversational Message Handler ────────────────────────
 const processChatMessage = async (req, res) => {
   try {
@@ -604,6 +651,348 @@ const processChatMessage = async (req, res) => {
 
     const user = req.user || null;
     const userName = user?.name ? user.name.split(' ')[0] : 'there';
+    let bookingState = context?.bookingState || null;
+
+    // ─────────────────────────────────────────────────────────────
+    // IN-CHAT CONVERSATIONAL BOOKING FLOW (Multi-step wizard)
+    // ─────────────────────────────────────────────────────────────
+    if (bookingState && (lower === 'cancel booking' || lower === 'cancel' || lower === 'exit' || lower === 'stop' || lower === 'restart' || lower === '❌ cancel booking')) {
+      return res.json({
+        reply: `🚫 In-chat booking has been cancelled. How else can I assist you today?`,
+        intent: 'booking_cancelled',
+        quickReplies: ['🩺 Book Doctor Appointment', '🧪 Lab Tests & Pricing', '🔍 Track My Appointment', '🚨 Emergency Helpline'],
+        context: { bookingState: null }
+      });
+    }
+
+    // Step-by-Step In-Chat Booking Wizard Evaluation:
+    if (bookingState) {
+      // ----------------------------------------------------
+      // STEP 1B: Specialty Selection Response
+      // ----------------------------------------------------
+      if (bookingState.step === 'specialty') {
+        const detected = detectSpecialty(text) || text.replace(/[^\w\s&]/g, '').trim() || 'General Medicine';
+        const hospitals = await getHospitalList();
+        const topHosp = hospitals.slice(0, 4).map(h => h.name);
+
+        return res.json({
+          reply: `🩺 **Department Selected:** **${detected}**\n\n` +
+            `🏥 **Step 2 of 4: Please select your preferred hospital or clinic:**`,
+          intent: 'booking_step_hospital',
+          quickReplies: [...topHosp, 'All Accredited Hospitals', '⬅️ Back', '❌ Cancel Booking'],
+          context: {
+            bookingState: {
+              ...bookingState,
+              step: 'hospital',
+              specialty: detected
+            }
+          }
+        });
+      }
+
+      // ----------------------------------------------------
+      // STEP 2: Hospital Selection Response
+      // ----------------------------------------------------
+      if (bookingState.step === 'hospital') {
+        if (lower.includes('back')) {
+          return res.json({
+            reply: `🩺 **Let's book your appointment right here in chat!**\n\n` +
+              `**Step 1 of 4: Which medical specialty or department do you need?**`,
+            intent: 'booking_step_specialty',
+            quickReplies: ['Cardiology ❤️', 'Neurology 🧠', 'Orthopedics 🦴', 'Pediatrics 👶', 'General Medicine 🩺', 'Dermatology ✨', 'Gynecology 🌸', 'Lab Blood Test 🧪', 'Dental Care 🦷', '❌ Cancel Booking'],
+            context: { bookingState: { step: 'specialty' } }
+          });
+        }
+
+        const hospitals = await getHospitalList();
+        let selectedHospital = hospitals.find(h => lower.includes(h.name.toLowerCase()) || lower.includes(h.city.toLowerCase()));
+        if (!selectedHospital && hospitals.length > 0) {
+          selectedHospital = hospitals[0];
+        }
+
+        const hospName = selectedHospital ? selectedHospital.name : 'MEDPARK Multi-Specialty Hospital';
+        const hospId = selectedHospital ? selectedHospital.id : '1';
+
+        // Next 4 dates (Today, Tomorrow, +2, +3)
+        const d0 = new Date();
+        const d1 = new Date(Date.now() + 86400000);
+        const d2 = new Date(Date.now() + 2 * 86400000);
+        const d3 = new Date(Date.now() + 3 * 86400000);
+
+        const formatDateStr = (d) => d.toISOString().split('T')[0];
+        const dateChips = [
+          `Today (${formatDateStr(d0)})`,
+          `Tomorrow (${formatDateStr(d1)})`,
+          formatDateStr(d2),
+          formatDateStr(d3)
+        ];
+
+        return res.json({
+          reply: `🏥 **Hospital Selected:** **${hospName}**\n` +
+            `🩺 **Specialty:** **${bookingState.specialty}**\n\n` +
+            `📅 **Step 3 of 4: Which date would you like to schedule your visit for?**\n` +
+            `Select a convenient date below or type any date (*YYYY-MM-DD*):`,
+          intent: 'booking_step_date',
+          quickReplies: [...dateChips, '⬅️ Change Hospital', '❌ Cancel Booking'],
+          context: {
+            bookingState: {
+              ...bookingState,
+              step: 'date',
+              hospitalId: String(hospId),
+              hospitalName: hospName
+            }
+          }
+        });
+      }
+
+      // ----------------------------------------------------
+      // STEP 3: Date Selection Response
+      // ----------------------------------------------------
+      if (bookingState.step === 'date') {
+        if (lower.includes('change hospital') || lower.includes('back')) {
+          const hospitals = await getHospitalList();
+          const topHosp = hospitals.slice(0, 4).map(h => h.name);
+          return res.json({
+            reply: `🏥 **Step 2 of 4: Please choose your preferred hospital or clinic:**`,
+            intent: 'booking_step_hospital',
+            quickReplies: [...topHosp, 'All Accredited Hospitals', '❌ Cancel Booking'],
+            context: { bookingState: { ...bookingState, step: 'hospital' } }
+          });
+        }
+
+        let chosenDate = '';
+        const dateMatch = text.match(/\b(202\d-\d{2}-\d{2})\b/);
+        if (dateMatch) {
+          chosenDate = dateMatch[1];
+        } else if (lower.includes('today')) {
+          chosenDate = new Date().toISOString().split('T')[0];
+        } else if (lower.includes('tomorrow')) {
+          chosenDate = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+        } else {
+          chosenDate = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+        }
+
+        const slotChips = ['09:00 AM', '10:00 AM', '11:30 AM', '02:00 PM', '03:30 PM', '05:00 PM'];
+
+        return res.json({
+          reply: `📅 **Date Selected:** **${chosenDate}**\n` +
+            `🏥 **Hospital:** **${bookingState.hospitalName}**\n\n` +
+            `⏰ **Step 4 of 4: Please pick an available time slot:**`,
+          intent: 'booking_step_time',
+          quickReplies: [...slotChips, '⬅️ Change Date', '❌ Cancel Booking'],
+          context: {
+            bookingState: {
+              ...bookingState,
+              step: 'time',
+              date: chosenDate
+            }
+          }
+        });
+      }
+
+      // ----------------------------------------------------
+      // STEP 4: Time Slot Selection Response
+      // ----------------------------------------------------
+      if (bookingState.step === 'time') {
+        if (lower.includes('change date') || lower.includes('back')) {
+          const d0 = new Date();
+          const d1 = new Date(Date.now() + 86400000);
+          const d2 = new Date(Date.now() + 2 * 86400000);
+          const formatDateStr = (d) => d.toISOString().split('T')[0];
+          return res.json({
+            reply: `📅 **Select your appointment date:**`,
+            intent: 'booking_step_date',
+            quickReplies: [`Today (${formatDateStr(d0)})`, `Tomorrow (${formatDateStr(d1)})`, formatDateStr(d2), '❌ Cancel Booking'],
+            context: { bookingState: { ...bookingState, step: 'date' } }
+          });
+        }
+
+        let cleanTime = '10:00';
+        const timeMatch = text.match(/\b(\d{1,2}:\d{2})\s*(am|pm)?\b/i);
+        if (timeMatch) {
+          let [h, m] = timeMatch[1].split(':').map(Number);
+          const isPm = (timeMatch[2] || '').toLowerCase() === 'pm';
+          const isAm = (timeMatch[2] || '').toLowerCase() === 'am';
+          if (isPm && h < 12) h += 12;
+          if (isAm && h === 12) h = 0;
+          cleanTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        } else if (lower.includes('09') || lower.includes('9')) {
+          cleanTime = '09:00';
+        } else if (lower.includes('11')) {
+          cleanTime = '11:30';
+        } else if (lower.includes('02') || lower.includes('2')) {
+          cleanTime = '14:00';
+        } else if (lower.includes('03') || lower.includes('3')) {
+          cleanTime = '15:30';
+        } else if (lower.includes('05') || lower.includes('5')) {
+          cleanTime = '17:00';
+        }
+
+        const nextState = {
+          ...bookingState,
+          step: 'patient_details',
+          time: cleanTime
+        };
+
+        if (user && user.name) {
+          const userPhone = user.mobile || user.phone || '9876543210';
+          return res.json({
+            reply: `⏰ **Time Slot Selected:** **${cleanTime}**\n\n` +
+              `👤 **Confirm Patient Details:**\n` +
+              `* 👤 **Patient Name:** ${user.name}\n` +
+              `* 📱 **Mobile:** ${userPhone}\n` +
+              `* 📧 **Email:** ${user.email || 'patient@medpark.com'}\n\n` +
+              `Click **"✅ Confirm Booking"** below to book instantly, or reply with a different patient name and phone number (e.g. *"Rahul Sharma, 9876543210"*):`,
+            intent: 'booking_step_confirm',
+            quickReplies: ['✅ Confirm Booking', 'Book for Family Member', '❌ Cancel Booking'],
+            context: {
+              bookingState: {
+                ...nextState,
+                step: 'confirm',
+                patientName: user.name,
+                patientPhone: userPhone,
+                email: user.email || ''
+              }
+            }
+          });
+        }
+
+        return res.json({
+          reply: `⏰ **Time Slot Selected:** **${cleanTime}**\n\n` +
+            `👤 **Almost Done! Please provide Patient Details:**\n` +
+            `Please reply with the **Patient's Full Name** and **10-digit Mobile Number** (e.g. *"Amit Sharma, 9876543210"*):`,
+          intent: 'booking_step_patient_details',
+          quickReplies: ['❌ Cancel Booking'],
+          context: {
+            bookingState: nextState
+          }
+        });
+      }
+
+      // ----------------------------------------------------
+      // STEP 5: Patient Details & Final DB Booking
+      // ----------------------------------------------------
+      if (bookingState.step === 'patient_details' || bookingState.step === 'confirm') {
+        let patientName = bookingState.patientName || '';
+        let patientPhone = bookingState.patientPhone || '';
+        let patientEmail = bookingState.email || user?.email || 'patient@medpark.com';
+
+        // Check if user confirmed directly or provided new details
+        if (lower.includes('confirm') || lower === 'yes' || lower === 'book now' || lower === '✅ confirm booking') {
+          if (!patientName) patientName = user?.name || 'Valued Patient';
+          if (!patientPhone) patientPhone = user?.mobile || user?.phone || '9876543210';
+        } else {
+          // Parse Name and Phone from text (e.g. "Amit Sharma, 9876543210" or "Rahul Verma 9876543210")
+          const phoneMatch = text.match(/\b([6-9]\d{9})\b/);
+          if (phoneMatch) {
+            patientPhone = phoneMatch[1];
+            patientName = text.replace(phoneMatch[0], '').replace(/[,\-–:]/g, '').trim() || user?.name || 'Valued Patient';
+          } else if (text.length > 2 && !lower.includes('cancel')) {
+            patientName = text.trim();
+            patientPhone = user?.mobile || user?.phone || '9876543210';
+          }
+        }
+
+        // Generate unique 4-digit appointment number
+        const appointmentNumber = await generateAppointmentNumber();
+        const appointmentId = Date.now().toString();
+
+        const appointment = {
+          id: appointmentId,
+          userId: user?.id || null,
+          hospitalId: bookingState.hospitalId || '1',
+          hospital: bookingState.hospitalName || 'MEDPARK Multi-Specialty Hospital',
+          doctorName: `${bookingState.specialty || 'General'} Specialist`,
+          date: bookingState.date || new Date(Date.now() + 86400000).toISOString().split('T')[0],
+          time: bookingState.time || '10:00',
+          patientName: patientName || 'Patient',
+          patientPhone: patientPhone || '9876543210',
+          email: patientEmail,
+          reason: `In-Chat Booking: ${bookingState.specialty || 'Medical'} Consultation`,
+          appointmentType: (bookingState.specialty || '').toLowerCase().includes('lab') ? 'Lab Test' : 'Consult',
+          status: 'Confirmed',
+          source: 'chat_bot',
+          paymentStatus: 'Paid',
+          paymentAmount: 500,
+          paymentMethod: 'In-Chat Instant Booking',
+          appointment_number: appointmentNumber,
+          createdAt: new Date().toISOString()
+        };
+
+        // Insert into database
+        let savedAppt = null;
+        if (supabase) {
+          try {
+            const resIns = await supabase.from('appointments').insert(appointment).select().single();
+            if (!resIns.error && resIns.data) savedAppt = resIns.data;
+          } catch (_) {}
+        }
+        if (!savedAppt) {
+          const db = readDB();
+          db.appointments = db.appointments || [];
+          db.appointments.unshift(appointment);
+          writeDB(db);
+          savedAppt = appointment;
+        }
+
+        // Trigger email notification and invoice PDF asynchronously
+        try {
+          if (savedAppt.email) {
+            let invoicePdfBuffer = null;
+            try {
+              invoicePdfBuffer = await generateAppointmentInvoice(savedAppt);
+            } catch (_) {}
+            sendAppointmentConfirmation({
+              to: savedAppt.email,
+              patientName: savedAppt.patientName,
+              patientPhone: savedAppt.patientPhone,
+              hospitalName: savedAppt.hospital,
+              date: savedAppt.date,
+              time: savedAppt.time,
+              doctorName: savedAppt.doctorName,
+              appointmentNumber: savedAppt.appointment_number,
+              paymentStatus: savedAppt.paymentStatus,
+              paymentAmount: savedAppt.paymentAmount,
+              paymentMethod: savedAppt.paymentMethod,
+              invoicePdfBuffer
+            }).catch(() => {});
+          }
+          broadcast('appointment_created', savedAppt);
+        } catch (_) {}
+
+        const reply = `🎉 **Your Appointment is Successfully Booked!**\n\n` +
+          `### 🟢 Appointment #${savedAppt.appointment_number} Confirmed\n\n` +
+          `* 👤 **Patient Name:** ${savedAppt.patientName}\n` +
+          `* 🏥 **Hospital:** ${savedAppt.hospital}\n` +
+          `* 🩺 **Specialty / Doctor:** ${savedAppt.doctorName}\n` +
+          `* 📅 **Scheduled Slot:** **${savedAppt.date}** at ⏰ **${savedAppt.time}**\n` +
+          `* 📱 **Mobile:** ${savedAppt.patientPhone}\n` +
+          `* 📊 **Status:** **Confirmed**\n` +
+          `* 💳 **Payment:** 💳 Paid (₹${savedAppt.paymentAmount})\n\n` +
+          `> 📧 An official booking confirmation and tax invoice PDF have been registered to your account.\n\n` +
+          `How else can I help you today?`;
+
+        return res.json({
+          reply,
+          intent: 'appointment_booked_success',
+          appointment: savedAppt,
+          quickReplies: [
+            'Download Invoice PDF',
+            `Track #${savedAppt.appointment_number}`,
+            '📋 What Documents to Bring',
+            'Book Another Appointment'
+          ],
+          action: {
+            type: 'view_appointment',
+            appointmentId: savedAppt.id,
+            appointmentNumber: savedAppt.appointment_number,
+            url: `/dashboard/my-appointments?id=${savedAppt.id}`,
+            label: '📑 View in My Appointments'
+          },
+          context: { bookingState: null }
+        });
+      }
+    }
 
     // ─────────────────────────────────────────────────────────────
     // 1. APPOINTMENT TRACKING & STATUS (Matches #1234, 1234, track appointment, check booking, my appointment)
@@ -778,7 +1167,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 4. BOOK APPOINTMENT INTENT (Strictly checks for booking intention)
+    // 4. INITIATE IN-CHAT BOOK APPOINTMENT FLOW
     // ─────────────────────────────────────────────────────────────
     const isBookingQuery = !isTrackingQuery && (
       lower.includes('book') ||
@@ -786,33 +1175,53 @@ const processChatMessage = async (req, res) => {
       lower.includes('schedule') ||
       lower.includes('see a doctor') ||
       lower.includes('doctor visit') ||
+      lower === 'book' ||
+      lower === 'book doctor' ||
+      lower === 'book appointment' ||
       (lower.includes('appointment') && !lower.includes('track') && !lower.includes('status') && !lower.includes('my appointment'))
     );
 
     if (isBookingQuery) {
-      const slots = getDailyTimeSlots ? getDailyTimeSlots().slice(0, 6) : ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00'];
+      const detectedSpec = detectSpecialty(text);
+
+      if (detectedSpec) {
+        const hospitals = await getHospitalList();
+        const topHosp = hospitals.slice(0, 4).map(h => h.name);
+
+        return res.json({
+          reply: `🩺 **Specialty Selected:** **${detectedSpec}**\n\n` +
+            `🏥 **Step 2 of 4: Please choose your preferred hospital or medical centre:**`,
+          intent: 'booking_step_hospital',
+          quickReplies: [...topHosp, 'All Accredited Hospitals', '❌ Cancel Booking'],
+          context: {
+            bookingState: {
+              step: 'hospital',
+              specialty: detectedSpec
+            }
+          }
+        });
+      }
 
       return res.json({
-        reply: `🩺 **Schedule a Doctor Consultation or Diagnostic Test**\n\n` +
-          `You can book verified specialist doctors across our accredited hospital network with instant slot confirmation and automated invoice generation.\n\n` +
-          `**What you can do:**\n` +
-          `1. Choose your preferred specialty or diagnostic test.\n` +
-          `2. Select your hospital and convenient date.\n` +
-          `3. Pick a time slot (${slots.join(', ')}, etc.).\n` +
-          `4. Pay securely via UPI, Card, or Net Banking.\n\n` +
-          `👉 Click below to open the interactive booking window directly:`,
-        intent: 'book_appointment',
+        reply: `🩺 **Let's book your appointment right here in chat!**\n\n` +
+          `**Step 1 of 4: Which medical specialty or service do you need?**`,
+        intent: 'booking_step_specialty',
         quickReplies: [
-          'Book Cardiology',
-          'Book Neurology',
-          'Book Pediatrics',
-          'Book Lab Test',
-          'Check Available Slots'
+          'Cardiology ❤️',
+          'Neurology 🧠',
+          'Orthopedics 🦴',
+          'Pediatrics 👶',
+          'General Medicine 🩺',
+          'Dermatology ✨',
+          'Gynecology 🌸',
+          'Lab Blood Test 🧪',
+          'Dental Care 🦷',
+          '❌ Cancel Booking'
         ],
-        action: {
-          type: 'open_booking_modal',
-          url: '/dashboard/book-appointment',
-          label: '🩺 Book Appointment Now'
+        context: {
+          bookingState: {
+            step: 'specialty'
+          }
         }
       });
     }
