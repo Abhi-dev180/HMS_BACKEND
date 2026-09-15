@@ -278,5 +278,6 @@ const refreshToken = async (req, res) => {
 
 module.exports = {
   login, register, refreshToken, getAdmins, createAdmin, updateAdmin, deleteAdmin,
-  getAllUsers, createUser, updateUser, deleteUser, forgotPassword, resetPassword
+  getAllUsers, createUser, updateUser, deleteUser, forgotPassword, resetPassword,
+  getLatestSubscription, publicUser
 };

@@ -737,7 +737,106 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { supabase } = require('../config/supabase');
+const { readDB } = require('../models');
 const { sendOtpEmail, sendProfileUpdatedEmail } = require('../services/emailService');
+const { getLatestSubscription, publicUser } = require('../controllers/authController');
+
+// ─── Get Current User Profile & Subscription Details ─────────
+const getProfileHandler = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: 'User not authenticated' });
+    }
+
+    let userRecord = null;
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+        if (!error && data) userRecord = data;
+      } catch (e) {}
+    }
+
+    if (!userRecord) {
+      const db = readDB();
+      userRecord = (db.users || []).find((u) => String(u.id) === String(userId)) || req.user;
+    }
+
+    if (!userRecord) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Resolve hospital if not set
+    if (!userRecord.hospital && userRecord.email) {
+      if (supabase) {
+        try {
+          const { data: reg } = await supabase
+            .from('registrations')
+            .select('hospital_name, hospital')
+            .eq('email', userRecord.email)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (reg?.hospital_name || reg?.hospital) {
+            userRecord.hospital = reg.hospital_name || reg.hospital;
+          }
+        } catch (_) {}
+
+        if (!userRecord.hospital) {
+          try {
+            const { data: hosp } = await supabase
+              .from('hospitals')
+              .select('name')
+              .or(`admin_email.eq.${userRecord.email},email.eq.${userRecord.email}`)
+              .limit(1)
+              .maybeSingle();
+            if (hosp?.name) userRecord.hospital = hosp.name;
+          } catch (_) {}
+        }
+
+        if (!userRecord.hospital) {
+          try {
+            const { data: demo } = await supabase
+              .from('demo_bookings')
+              .select('hospital_name')
+              .eq('email', userRecord.email)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (demo?.hospital_name) userRecord.hospital = demo.hospital_name;
+          } catch (_) {}
+        }
+      }
+
+      if (!userRecord.hospital) {
+        const db = readDB();
+        const reg = (db.registrations || []).find((r) => r.email === userRecord.email);
+        if (reg?.hospital_name || reg?.hospital) {
+          userRecord.hospital = reg.hospital_name || reg.hospital;
+        }
+        const hosp = (db.hospitals || []).find((h) => h.admin_email === userRecord.email || h.email === userRecord.email);
+        if (hosp?.name) {
+          userRecord.hospital = hosp.name;
+        }
+      }
+    }
+
+    const subscription = await getLatestSubscription(userId);
+    const fullUser = publicUser(userRecord, subscription);
+
+    return res.json({ user: fullUser, subscription });
+  } catch (err) {
+    console.error('[userRoutes] get profile error:', err);
+    return res.status(500).json({ message: 'Failed to fetch profile' });
+  }
+};
+
+router.get('/profile', authMiddleware, getProfileHandler);
+router.get('/me', authMiddleware, getProfileHandler);
 
 // ─── Generate 4‑digit OTP ──────────────────────────────────
 const generateOtp = () => Math.floor(1000 + Math.random() * 9000);
