@@ -84,7 +84,7 @@ const KNOWLEDGE_FAQS = [
   },
   {
     id: 'fasting_guidelines',
-    keywords: ['fasting', 'fasting for test', 'empty stomach', 'water before test', 'food before blood test', 'can i eat before', 'fasting requirement'],
+    keywords: ['fasting', 'fast', 'fasting for test', 'fast before', 'need to fast', 'empty stomach', 'water before test', 'food before blood test', 'can i eat before', 'fasting requirement'],
     reply: `🧪 **Fasting Guidelines for Diagnostic Lab Tests:**\n\n` +
       `* **Tests Requiring 10–12 Hours Fasting:**\n` +
       `  * *Lipid Profile (Cholesterol, Triglycerides)*\n` +
@@ -1244,6 +1244,13 @@ const processChatMessage = async (req, res) => {
         const paymentMethodStr = paymentInfo?.paymentMethod || (isCounterPayment ? 'Hospital Front Desk Counter' : 'Online Payment Gateway');
         const paymentIdStr = paymentInfo?.paymentId || (isCounterPayment ? `COUNTER_${Date.now()}` : `PAY_GATEWAY_${Date.now()}`);
 
+        const isLabTestSpecialty = Boolean(
+          (bookingState.specialty || '').toLowerCase().includes('lab') ||
+          (bookingState.specialty || '').toLowerCase().includes('test') ||
+          (bookingState.specialty || '').toLowerCase().includes('blood') ||
+          POPULAR_LAB_TESTS.some(t => t.name.toLowerCase() === (bookingState.specialty || '').toLowerCase())
+        );
+
         const appointment = {
           id: appointmentId,
           userId: user?.id || null,
@@ -1256,7 +1263,7 @@ const processChatMessage = async (req, res) => {
           patientPhone: patientPhone,
           email: patientEmail,
           reason: `In-Chat Booking: ${bookingState.specialty || 'Medical'} Consultation`,
-          appointmentType: (bookingState.specialty || '').toLowerCase().includes('lab') ? 'Lab Test' : 'Consult',
+          appointmentType: isLabTestSpecialty ? 'Lab Test' : 'Consult',
           status: isPaid ? 'Confirmed' : 'Pending',
           source: 'chat_bot',
           paymentStatus: isPaid ? 'Paid' : 'Unpaid (Pay at Hospital Counter)',
@@ -1735,10 +1742,11 @@ const processChatMessage = async (req, res) => {
       lower.includes('ambulance') ||
       lower.includes('urgent') ||
       lower.includes('casualty') ||
+      lower.includes('trauma') ||
       lower.includes('helpline') ||
-      lower.includes('icu') ||
-      lower.includes('critical') ||
-      lower.includes('call doctor')
+      lower.includes('critical care') ||
+      lower.includes('call doctor') ||
+      (lower.includes('icu') && !lower.includes('bed') && !lower.includes('hospital'))
     ) {
       return res.json({
         reply: `🚨 **24/7 Emergency & Critical Care Helplines**\n\n` +
@@ -1800,49 +1808,12 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 8. HOSPITALS & BEDS INTENT
-    // ─────────────────────────────────────────────────────────────
-    if (
-      lower.includes('hospital') ||
-      lower.includes('bed') ||
-      lower.includes('facility') ||
-      lower.includes('location') ||
-      lower.includes('branch') ||
-      lower.includes('city')
-    ) {
-      const hospitals = await getHospitalList();
-      const hospMarkdown = hospitals.slice(0, 4)
-        .map((h) => `* 🏥 **${h.name}** (${h.city || 'Metro City'})\n  🛏️ Total Beds: **${h.beds || '350+'}** | 🚨 Emergency: **${h.emergency || '24/7'}** | 📞 ${h.phone || '+91-1800-419-1234'}`)
-        .join('\n\n');
-
-      return res.json({
-        reply: `🏥 **Our Accredited Hospital Network**\n\n` +
-          `MEDPARK partners with premier multi-specialty hospitals equipped with cutting-edge diagnostics, modular OTs, and dedicated ICUs:\n\n` +
-          `${hospMarkdown}\n\n` +
-          `👉 You can filter hospitals by city, specialty, and bed availability on our portal.`,
-        intent: 'find_hospitals',
-        hospitals,
-        quickReplies: [
-          'Explore All Hospitals',
-          'Book Doctor in Hospital',
-          'Check Bed Availability',
-          'Emergency Helplines'
-        ],
-        action: {
-          type: 'view_hospitals',
-          url: '/dashboard/explore-hospitals'
-        }
-      });
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // 9. PRICING & HOSPITAL SOFTWARE SUBSCRIPTIONS INTENT
+    // 8. PRICING & HOSPITAL SOFTWARE SUBSCRIPTIONS INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('pricing') ||
       lower.includes('plan') ||
       lower.includes('subscription') ||
-      lower.includes('cost') ||
       lower.includes('software') ||
       lower.includes('tier') ||
       lower.includes('quarterly') ||
@@ -1875,7 +1846,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 10. CANCELLATION & REFUND POLICY INTENT
+    // 9. CANCELLATION & REFUND POLICY INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('cancel') ||
@@ -1899,6 +1870,42 @@ const processChatMessage = async (req, res) => {
         action: {
           type: 'view_appointments',
           url: '/dashboard/my-appointments'
+        }
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 10. HOSPITALS, LOCATIONS & BEDS INTENT
+    // ─────────────────────────────────────────────────────────────
+    if (
+      lower.includes('hospital') ||
+      lower.includes('bed') ||
+      lower.includes('facility') ||
+      lower.includes('location') ||
+      lower.includes('branch') ||
+      lower.includes('city')
+    ) {
+      const hospitals = await getHospitalList();
+      const hospMarkdown = hospitals.slice(0, 4)
+        .map((h) => `* 🏥 **${h.name}** (${h.city || 'Metro City'})\n  🛏️ Total Beds: **${h.beds || '350+'}** | 🚨 Emergency: **${h.emergency || '24/7'}** | 📞 ${h.phone || '+91-1800-419-1234'}`)
+        .join('\n\n');
+
+      return res.json({
+        reply: `🏥 **Our Accredited Hospital Network**\n\n` +
+          `MEDPARK partners with premier multi-specialty hospitals equipped with cutting-edge diagnostics, modular OTs, and dedicated ICUs:\n\n` +
+          `${hospMarkdown}\n\n` +
+          `👉 You can filter hospitals by city, specialty, and bed availability on our portal.`,
+        intent: 'find_hospitals',
+        hospitals,
+        quickReplies: [
+          'Explore All Hospitals',
+          'Book Doctor in Hospital',
+          'Check Bed Availability',
+          'Emergency Helplines'
+        ],
+        action: {
+          type: 'view_hospitals',
+          url: '/dashboard/explore-hospitals'
         }
       });
     }
