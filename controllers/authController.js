@@ -70,7 +70,7 @@ const signToken = (u) =>
   jwt.sign(
     { id: u.id, role: u.role, name: u.name, email: u.email, mobile: u.mobile || u.phone, hospitalId: u.hospitalId },
     SECRET,
-    { expiresIn: '2h' }
+    { expiresIn: '7d' }
   );
 
 const login = async (req, res) => {
