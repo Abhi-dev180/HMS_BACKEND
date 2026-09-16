@@ -1309,6 +1309,9 @@ const processChatMessage = async (req, res) => {
               paymentStatus: savedAppt.paymentStatus,
               paymentAmount: savedAppt.paymentAmount,
               paymentMethod: savedAppt.paymentMethod,
+              appointmentType: savedAppt.appointmentType,
+              serviceName: savedAppt.appointmentType === 'Lab Test' ? savedAppt.doctorName : undefined,
+              description: savedAppt.reason,
               invoicePdfBuffer
             }).catch(() => {});
           }
