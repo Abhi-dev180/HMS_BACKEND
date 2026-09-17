@@ -5,6 +5,7 @@ const { getDailyTimeSlots } = require('../services/schedulerService');
 const { sendAppointmentConfirmation } = require('../services/emailService');
 const { generateAppointmentInvoice } = require('../services/invoiceService');
 const { broadcast } = require('../services/websocketService');
+const { executeAppointmentCancellation } = require('./appointmentController');
 
 // ─── Helper: generate unique 4-digit appointment number ──────
 const generateAppointmentNumber = async () => {
@@ -55,6 +56,247 @@ const SPECIALTIES = [
   { name: 'General Medicine', desc: 'Fever, diabetes, infectious diseases & wellness', icon: '🩺' },
   { name: 'Gynecology & Obstetrics', desc: 'Women health, maternity care & fertility', icon: '🌸' },
   { name: 'Ophthalmology', desc: 'Eye care, cataract, retina & vision testing', icon: '👁️' }
+];
+
+// ─── Clinical Medicine & Dosage Database ────────────────────────
+const MEDICINE_DATABASE = [
+  {
+    id: 'metformin',
+    names: ['metformin', 'glycomet', 'glucophage', 'glumetza'],
+    generic: 'Metformin Hydrochloride',
+    category: 'Oral Anti-Diabetic (Biguanide)',
+    commonDosage: '500 mg / 850 mg / 1000 mg once or twice daily',
+    timing: '🍽️ Take with or immediately after meals',
+    instructions: 'Taking Metformin with food significantly reduces stomach upset and nausea. Swallow tablet whole with a full glass of water. Do not crush.',
+    precautions: 'Stay well-hydrated. Avoid excessive alcohol consumption. If you miss a dose, take it with your next meal; never double up on tablets.',
+    emergencyWarning: 'Seek immediate care if you experience extreme fatigue, severe muscle cramps, rapid shallow breathing (signs of lactic acidosis).'
+  },
+  {
+    id: 'paracetamol',
+    names: ['paracetamol', 'dolo', 'dolo 650', 'calpol', 'crocin', 'acetaminophen', 'panadol'],
+    generic: 'Paracetamol / Acetaminophen',
+    category: 'Antipyretic & Analgesic (Fever & Pain Relief)',
+    commonDosage: '500 mg - 650 mg every 4 to 6 hours as needed',
+    timing: '🍽️ Can be taken with or without food (preferably after a light snack)',
+    instructions: 'Maintain at least a 4–6 hour gap between consecutive doses. Maximum safe limit is 3000 mg (3 grams) per 24 hours for adults.',
+    precautions: 'Do not combine with other cold/cough syrups containing paracetamol to prevent accidental liver toxicity.',
+    emergencyWarning: 'Contact emergency if fever exceeds 103°F (39.4°C) or lasts over 3 days despite medication.'
+  },
+  {
+    id: 'pantoprazole',
+    names: ['pantoprazole', 'pan', 'pan-d', 'pan 40', 'pantocid', 'pantosec', 'protonix'],
+    generic: 'Pantoprazole Sodium (Proton Pump Inhibitor)',
+    category: 'Gastro-resistant Acid Reducer / GERD',
+    commonDosage: '40 mg once daily (or Pan-D with Domperidone for nausea)',
+    timing: '🌅 Take 30 to 45 minutes BEFORE morning breakfast',
+    instructions: 'Take with a full glass of plain water on an empty stomach first thing in the morning. Do not chew or crush the enteric-coated tablet.',
+    precautions: 'Avoid spicy, oily foods and caffeine. For optimal symptom control, maintain regular meal timings.',
+    emergencyWarning: 'Seek medical evaluation if chest burning is accompanied by shortness of breath or left arm numbness.'
+  },
+  {
+    id: 'amoxicillin',
+    names: ['amoxicillin', 'augmentin', 'amoxyclav', 'mox', 'moxclav', 'clavulin'],
+    generic: 'Amoxicillin + Clavulanic Acid',
+    category: 'Broad-Spectrum Antibiotic (Penicillin class)',
+    commonDosage: '625 mg (500mg/125mg) twice daily or 375 mg thrice daily',
+    timing: '🍽️ Take at the start of a meal or with food',
+    instructions: '⚠️ CRITICAL: Always complete the full prescribed 5 to 7 day antibiotic course even if you feel completely recovered to prevent bacterial resistance.',
+    precautions: 'Space doses evenly (every 12 hours). Stay hydrated and consider consuming probiotics/curd to support gut flora.',
+    emergencyWarning: 'Discontinue immediately and seek emergency care if allergic hives, facial swelling, or breathing difficulty occurs.'
+  },
+  {
+    id: 'atorvastatin',
+    names: ['atorvastatin', 'atorva', 'lipitor', 'storvas', 'tonact', 'rosuvastatin', 'rosuvas'],
+    generic: 'Atorvastatin / Rosuvastatin Calcium',
+    category: 'Lipid-Lowering Agent (HMG-CoA Reductase Inhibitor)',
+    commonDosage: '10 mg / 20 mg / 40 mg once daily',
+    timing: '🌙 Best taken at bedtime or after dinner',
+    instructions: 'Cholesterol production in the liver peaks during nighttime, making bedtime administration most effective. Take consistently at the same time each day.',
+    precautions: 'Pair with a low-cholesterol, high-fiber diet. Avoid grapefruit and excessive alcohol.',
+    emergencyWarning: 'Notify your physician if you develop unexplained muscle pain, tenderness, or dark brown urine.'
+  },
+  {
+    id: 'amlodipine',
+    names: ['amlodipine', 'amlong', 'stamlo', 'telmisartan', 'telma', 'telpres', 'norvasc'],
+    generic: 'Amlodipine Besylate / Telmisartan',
+    category: 'Antihypertensive (Blood Pressure Controller)',
+    commonDosage: '5 mg / 10 mg (Amlodipine) or 40 mg / 80 mg (Telmisartan) once daily',
+    timing: '☀️ Take once daily in the morning at the same time',
+    instructions: 'Take consistently with water. Do not abruptly stop taking blood pressure medications without consulting your cardiologist.',
+    precautions: 'Monitor blood pressure at home weekly. Rise slowly from sitting or lying positions to avoid postural dizziness.',
+    emergencyWarning: 'Seek immediate emergency attention if blood pressure exceeds 180/110 mmHg or if experiencing severe dizziness/chest tightness.'
+  },
+  {
+    id: 'cetirizine',
+    names: ['cetirizine', 'cetzine', 'zyrtec', 'allegra', 'fexofenadine', 'montair', 'montair-lc', 'levocetirizine'],
+    generic: 'Cetirizine Hydrochloride / Levocetirizine + Montelukast',
+    category: 'Antihistamine (Anti-Allergy & Respiratory Relief)',
+    commonDosage: '5 mg / 10 mg once daily',
+    timing: '🌙 Best taken at night before sleeping',
+    instructions: 'May cause mild drowsiness or sedation. Ideal for nighttime dosing before sleep.',
+    precautions: 'Avoid driving, operating heavy machinery, or consuming alcohol while taking antihistamines.',
+    emergencyWarning: 'Seek emergency care if experiencing wheezing, severe throat swelling, or difficulty swallowing.'
+  },
+  {
+    id: 'azithromycin',
+    names: ['azithromycin', 'azithral', 'zithromax', 'azee', 'azimax'],
+    generic: 'Azithromycin (Macrolide Antibiotic)',
+    category: 'Antibacterial for Respiratory, Throat & Skin Infections',
+    commonDosage: '500 mg once daily for 3 or 5 consecutive days',
+    timing: '⏰ Take 1 hour before a meal or 2 hours after meals',
+    instructions: 'Take once daily at the exact same hour every day. Complete the full 3 or 5-day cycle as directed.',
+    precautions: 'Do not take antacids containing aluminum or magnesium within 2 hours of your Azithromycin dose.',
+    emergencyWarning: 'Consult your doctor if severe watery diarrhea or irregular heart palpitations occur.'
+  }
+];
+
+// ─── Personalized Diet & Post-Procedure Clinical Care Plans ──────
+const DIET_AND_CARE_PLANS = [
+  {
+    id: 'diabetic',
+    title: '🥗 Diabetic Wellness & Glycemic Control Plan',
+    category: 'Endocrine & Metabolic Health',
+    overview: 'Designed to stabilize blood glucose levels, optimize HbA1c below 6.5%, and prevent insulin spikes.',
+    recommended: [
+      'Complex carbohydrates: Oats, quinoa, brown rice, whole wheat, millets (Ragi, Jowar)',
+      'High-fiber vegetables: Spinach, broccoli, bitter gourd (Karela), methi, okra, cauliflower',
+      'Lean protein: Egg whites, skinless chicken, grilled fish, paneer, tofu, sprouted lentils',
+      'Healthy fats: Almonds, walnuts, chia seeds, flaxseeds, cold-pressed olive or mustard oil',
+      'Low-glycemic fruits (in moderation): Guava, apple, papaya, berries, jamun'
+    ],
+    avoid: [
+      'Refined sugars: Sweets, pastries, aerated sodas, packaged juices, sweetened tea/coffee',
+      'Refined carbs: White flour (Maida), white bread, instant noodles, polished white rice',
+      'Deep-fried snacks: Samosas, pakoras, potato chips, processed trans-fat foods',
+      'High-GI fruits in large portions: Mangoes, grapes, chickoo (sapota), bananas'
+    ],
+    lifestyleTips: [
+      'Eat small, balanced meals every 3–4 hours; never skip breakfast.',
+      'Engage in 30–45 minutes of brisk walking or moderate physical activity daily.',
+      'Check fasting and post-prandial blood sugar levels at consistent intervals.'
+    ],
+    warningSigns: '🚨 Hypoglycemia warning: Shaky hands, excessive sweating, rapid heartbeat, dizziness. Immediately consume 15g of fast-acting glucose (fruit juice or 3 sugar candies) and consult your doctor.'
+  },
+  {
+    id: 'cardiac',
+    title: '❤️ Cardiac Care & Post-Angioplasty / Heart Diet',
+    category: 'Cardiovascular Health & Recovery',
+    overview: 'Formulated to reduce cardiovascular strain, prevent arterial plaque buildup, and maintain optimal blood pressure.',
+    recommended: [
+      'Low-sodium DASH foods: Fresh vegetables, unsalted nuts, whole grains',
+      'Omega-3 rich foods: Salmon, mackerel, walnuts, flaxseeds, chia seeds',
+      'Heart-friendly fruits: Pomegranate, berries, citrus fruits, apples, watermelon',
+      'Garlic, oats, and green leafy vegetables (help lower LDL cholesterol naturally)',
+      'Cooking oils: Use minimal extra virgin olive oil, mustard oil, or rice bran oil'
+    ],
+    avoid: [
+      'Excessive salt / Sodium: Limit total salt intake to under 1 teaspoon (2,000 mg sodium) per day',
+      'Pickles (Achaar), papad, processed cheeses, packaged soups, and salted namkeens',
+      'Red meat, organ meats, butter, ghee, and hydrogenated vanaspati fats',
+      'Smoking, tobacco in all forms, and heavy alcoholic beverages'
+    ],
+    lifestyleTips: [
+      'Gradually increase walking to 30 mins/day as approved by your cardiologist.',
+      'Avoid lifting heavy weights (>5 kg) for 4 weeks following angioplasty / stenting.',
+      'Keep your emergency Sorbitrate / Nitroglycerin tablets accessible at all times.'
+    ],
+    warningSigns: '🚨 Seek immediate emergency care if you experience crushing chest pressure, pain radiating to left shoulder/jaw, or sudden shortness of breath.'
+  },
+  {
+    id: 'maternity_csection',
+    title: '🌸 Post-Cesarean & Maternity Recovery Guide',
+    category: 'Obstetrics & Postpartum Maternal Care',
+    overview: 'Holistic care guidelines to accelerate abdominal wound healing, promote lactation, and restore iron/calcium stores.',
+    recommended: [
+      'Iron & Calcium rich diet: Spinach, fenugreek (Methi), dates, figs, boiled eggs, ragi, milk',
+      'Lactation enhancers (Galactagogues): Methi seeds, cumin (Jeera) water, garlic, oats, fennel (Saunf)',
+      'High protein for tissue repair: Daal, paneer, chicken soup, bone broth, soaked almonds',
+      'Hydration target: 3 to 4 liters of warm water and fluids daily to support breast milk supply',
+      'Fiber-rich fruits (papaya, pears, prunes) to prevent postpartum constipation'
+    ],
+    avoid: [
+      'Gassy & bloating foods: Raw cabbage, excessive carbonated drinks, oily spicy gravies',
+      'Lifting heavy objects heavier than your baby for the first 6 weeks post-surgery',
+      'Straining during bowel movements (use stool softeners if prescribed)'
+    ],
+    lifestyleTips: [
+      'Keep the surgical incision dry and clean. Pat gently with a sterile towel after bathing.',
+      'Wear a comfortable maternal support belt when walking or standing.',
+      'Practice gentle pelvic floor Kegel exercises once approved by your gynecologist.'
+    ],
+    warningSigns: '🚨 Contact your maternity hospital immediately if you experience incision redness/pus discharge, heavy vaginal bleeding (soaking >1 pad/hr), or fever >100.4°F.'
+  },
+  {
+    id: 'orthopedic',
+    title: '🦴 Post-Joint Replacement & Bone Care Protocol',
+    category: 'Orthopedic Rehabilitation',
+    overview: 'Evidence-based recovery guidelines for knee, hip, and fracture surgery rehabilitation.',
+    recommended: [
+      'Calcium & Vitamin D: Milk, yogurt, fortified cereals, sesame seeds, sunlight exposure',
+      'Collagen & Protein: Lentils, soy chunks, eggs, fish, bone broth for tendon and cartilage healing',
+      'Anti-inflammatory foods: Turmeric milk (Haldi doodh), ginger, berries, spinach, walnuts',
+      'Vitamin C rich foods (Amla, oranges, bell peppers) to boost collagen synthesis'
+    ],
+    avoid: [
+      'Cross-legged sitting (Palakhi / Sukhasana) or low squatting unless authorized by your surgeon',
+      'Wet bathroom floors and loose rugs (high slip and fall risk)',
+      'High-impact running, jumping, or sudden pivoting movements'
+    ],
+    lifestyleTips: [
+      'Apply cold ice packs for 15–20 minutes 3 times daily to reduce surgical knee/joint swelling.',
+      'Elevate the operated leg on 1–2 pillows while resting in bed.',
+      'Perform prescribed quadriceps sets, ankle pumps, and walker exercises diligently.'
+    ],
+    warningSigns: '🚨 Seek immediate orthopedic evaluation if you observe severe calf swelling/pain, sudden inability to bear weight, or incision warmth/drainage.'
+  },
+  {
+    id: 'renal',
+    title: '🫘 Renal & Kidney Health Dietary Guide',
+    category: 'Nephrology & Renal Care',
+    overview: 'Precision nutrition to reduce kidney workload, manage urea/creatinine, and balance electrolytes.',
+    recommended: [
+      'Controlled biological protein: Egg white, boiled fish, or measured tofu (as per nephrologist)',
+      'Low-potassium vegetables: Cabbage, cauliflower, cucumber, bottle gourd (Lauki), carrots',
+      'Low-potassium fruits: Apples, blueberries, strawberries, cranberries, pineapple',
+      'White rice or refined wheat in controlled portions (lower phosphorus than whole wheat)'
+    ],
+    avoid: [
+      'High-potassium foods: Bananas, oranges, coconut water, potatoes, tomatoes, spinach',
+      'High-phosphorus foods: Processed colas, packaged cheese, nuts, organ meats',
+      'Added table salt and potassium-based low-sodium salt substitutes (e.g. Lona salt)',
+      'Over-the-counter painkiller NSAIDs (Ibuprofen, Diclofenac) which damage renal tubules'
+    ],
+    lifestyleTips: [
+      'Strictly adhere to your daily fluid allowance (typically 1.2 to 1.5 L inclusive of tea/water).',
+      'Weigh yourself every morning to monitor sudden fluid retention.',
+      'Get serum creatinine, BUN, and electrolyte levels checked periodically.'
+    ],
+    warningSigns: '🚨 Red-flag signs: Facial puffiness, swollen feet, sudden drop in urine output, or difficulty breathing when lying flat.'
+  },
+  {
+    id: 'gerd',
+    title: '🌿 Acid Reflux (GERD) & Gastritis Soothing Plan',
+    category: 'Gastrointestinal & Digestive Health',
+    overview: 'Alkalizing and soothing nutritional plan to eliminate heartburn, acid regurgitation, and stomach ulcers.',
+    recommended: [
+      'Alkaline & soothing foods: Oatmeal, ripe bananas, melons, boiled potatoes, chamomile tea',
+      'Low-acid vegetables: Cucumber, zucchini, bottle gourd, pumpkin, green beans',
+      'Lean digestible proteins: Egg whites, boiled chicken, sprouted moong dal, curd/buttermilk',
+      'Fennel seeds (Saunf) and cold milk for natural acid neutralization'
+    ],
+    avoid: [
+      'Citrus fruits (lemon, oranges, tomatoes), raw onions, garlic, vinegar, and tamarind',
+      'Coffee, strong black tea, carbonated soda, chocolate, and peppermint',
+      'Extremely oily, deep-fried snacks, and chili-loaded gravies',
+      'Lying down flat within 2.5 to 3 hours of eating a meal'
+    ],
+    lifestyleTips: [
+      'Elevate the head of your bed by 6 inches using an extra wedge pillow.',
+      'Eat small, frequent meals rather than 2 or 3 heavy meals.',
+      'Wear loose, comfortable clothing that does not compress the abdomen.'
+    ],
+    warningSigns: '🚨 Consult a gastroenterologist if experiencing difficulty swallowing (dysphagia), unexplained weight loss, or dark black stools.'
+  }
 ];
 
 // ─── Comprehensive Knowledge Base & Text Question-Answer Database ───
@@ -562,6 +804,211 @@ const findAppointmentByNumber = async (appointmentNumber) => {
   return found || null;
 };
 
+// ─── Helper: Query Feedback for an Appointment ───────────────────
+const findFeedbackForAppointment = async (appointmentId, appointmentNumber) => {
+  if (!appointmentId && !appointmentNumber) return null;
+  const num = appointmentNumber ? Number(appointmentNumber) : null;
+  const strId = appointmentId ? String(appointmentId) : null;
+
+  if (supabase) {
+    try {
+      let query = supabase.from('appointment_feedbacks').select('*');
+      if (strId && !isNaN(num) && num > 0) {
+        query = query.or(`appointment_id.eq.${strId},appointment_number.eq.${num}`);
+      } else if (strId) {
+        query = query.eq('appointment_id', strId);
+      } else if (!isNaN(num) && num > 0) {
+        query = query.eq('appointment_number', num);
+      }
+      const { data, error } = await query.maybeSingle();
+      if (!error && data) return data;
+    } catch (_) {}
+  }
+
+  const db = readDB();
+  const list = db.feedbacks || db.appointment_feedbacks || [];
+  const found = list.find((f) => {
+    const matchId = strId && (String(f.appointmentId || f.appointment_id) === strId);
+    const matchNum = !isNaN(num) && num > 0 && (Number(f.appointmentNumber || f.appointment_number) === num);
+    return matchId || matchNum;
+  });
+  return found || null;
+};
+
+// ─── Helper: Save Feedback submitted via Chatbot ─────────────────
+const saveChatbotFeedback = async ({ appointment, user, rating, feedbackText }) => {
+  const resolvedPatientName = appointment?.patientName || appointment?.patientname || user?.name || 'Patient';
+  const resolvedDate = appointment?.date || new Date().toISOString().split('T')[0];
+  const resolvedHospitalId = appointment?.hospitalId || appointment?.hospitalid || user?.hospitalId || null;
+  const resolvedApptId = appointment?.id || null;
+  const resolvedApptNum = appointment?.appointment_number || appointment?.appointmentNumber || null;
+  const feedbackId = Date.now().toString();
+  const now = new Date().toISOString();
+
+  const row = {
+    id: feedbackId,
+    patientname: resolvedPatientName,
+    petname: appointment?.petName || appointment?.petname || '',
+    appointmenttype: appointment?.appointmentType || appointment?.appointmenttype || 'Doctor Consultation',
+    date: resolvedDate,
+    time: appointment?.time || '',
+    feedbackstatus: 'Published',
+    feedbackgiven: true,
+    callattempted: false,
+    callpicked: false,
+    feedbacktext: (feedbackText || '').trim(),
+    rating: Number(rating) || 5,
+    hospitalid: resolvedHospitalId,
+    appointment_id: resolvedApptId,
+    createdby: user?.id ? String(user.id) : 'chatbot_guest',
+    created_at: now
+  };
+
+  let createdRecord = null;
+
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('appointment_feedbacks')
+        .insert(row)
+        .select()
+        .single();
+      if (!error && data) {
+        createdRecord = data;
+      }
+    } catch (_) {}
+  }
+
+  // Update local DB
+  const db = readDB();
+  db.feedbacks = db.feedbacks || [];
+  const localEntry = {
+    id: createdRecord?.id || feedbackId,
+    appointmentId: resolvedApptId,
+    appointmentNumber: resolvedApptNum,
+    patientName: resolvedPatientName,
+    petName: row.petname,
+    appointmentType: row.appointmenttype,
+    date: resolvedDate,
+    time: row.time,
+    feedbackStatus: 'Published',
+    feedbackGiven: true,
+    callAttempted: false,
+    callPicked: false,
+    feedbackText: row.feedbacktext,
+    rating: row.rating,
+    hospitalId: resolvedHospitalId,
+    createdBy: row.createdby,
+    created_at: now
+  };
+  db.feedbacks.push(localEntry);
+
+  // Mark appointment as feedbackGiven
+  if (resolvedApptId || resolvedApptNum) {
+    if (db.appointments) {
+      const apptIdx = db.appointments.findIndex(a => 
+        (resolvedApptId && (String(a.id) === String(resolvedApptId) || String(a._id) === String(resolvedApptId))) ||
+        (resolvedApptNum && Number(a.appointment_number) === Number(resolvedApptNum))
+      );
+      if (apptIdx !== -1) {
+        db.appointments[apptIdx].feedbackGiven = true;
+        db.appointments[apptIdx].feedback_given = true;
+      }
+    }
+  }
+
+  writeDB(db);
+
+  if (supabase && resolvedApptId) {
+    try {
+      await supabase.from('appointments').update({ feedback_given: true }).eq('id', resolvedApptId);
+    } catch (_) {}
+  }
+
+  // Broadcast to WebSocket clients
+  try {
+    broadcast('feedback_created', localEntry);
+  } catch (_) {}
+
+  return localEntry;
+};
+
+// ─── Helper: Calculate Live OPD Token & Estimated Wait Time ──────
+const calculateOPDToken = (appointment) => {
+  if (!appointment) return null;
+  const num = Number(appointment.appointment_number || appointment.id || 1000);
+
+  // Deterministic token generation based on scheduled time slot
+  let tokenNumber = 12;
+  const timeStr = String(appointment.time || '10:00 AM').toUpperCase();
+  const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (timeMatch) {
+    let hour = parseInt(timeMatch[1]);
+    const min = parseInt(timeMatch[2]);
+    const ampm = (timeMatch[3] || 'AM').toUpperCase();
+    if (ampm === 'PM' && hour < 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+
+    // Start of OPD: 9:00 AM
+    const totalMinutesFrom9AM = Math.max(0, (hour - 9) * 60 + min);
+    tokenNumber = Math.max(1, Math.floor(totalMinutesFrom9AM / 15) + 1);
+  } else {
+    tokenNumber = (num % 25) + 1;
+  }
+
+  // Dynamic live serving token calculation
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMin = now.getMinutes();
+  let currentServing = Math.max(1, tokenNumber - 3);
+
+  // If appointment is today, evaluate clock-based serving token
+  const todayStr = now.toISOString().split('T')[0];
+  if (appointment.date === todayStr) {
+    if (currentHour >= 9 && currentHour < 18) {
+      const minutesToday = (currentHour - 9) * 60 + currentMin;
+      currentServing = Math.max(1, Math.floor(minutesToday / 15));
+    }
+  }
+
+  if (currentServing > tokenNumber) {
+    currentServing = tokenNumber;
+  }
+
+  const patientsAhead = Math.max(0, tokenNumber - currentServing);
+  const estimatedWaitMins = patientsAhead * 7; // Approx 7 mins per consultation
+
+  const roomNumber = `Room ${200 + (tokenNumber % 8) + 1}, ${['2nd Floor OPD Wing', '1st Floor Clinical Suite', 'Ground Floor Consultation Hub'][tokenNumber % 3]}`;
+  const doctorName = appointment.doctorName || appointment.serviceName || 'Senior Consultant';
+  const hospital = appointment.hospital || 'MEDPARK Multi-Specialty Hospital';
+
+  let statusLabel = 'In Queue (Waiting)';
+  let statusColor = 'amber';
+  if (patientsAhead === 0) {
+    statusLabel = '🟢 Next In Line / Calling Now';
+    statusColor = 'emerald';
+  } else if (patientsAhead <= 2) {
+    statusLabel = '🟡 Approaching Turn';
+    statusColor = 'amber';
+  }
+
+  return {
+    appointmentNumber: appointment.appointment_number || appointment.id,
+    patientName: appointment.patientName || 'Patient',
+    tokenNumber,
+    currentServing,
+    patientsAhead,
+    estimatedWaitMins,
+    roomNumber,
+    doctorName,
+    hospital,
+    statusLabel,
+    statusColor,
+    date: appointment.date,
+    time: appointment.time
+  };
+};
+
 // ─── Helper: Query User's Recent Appointments ────────────────────
 const getUserAppointments = async (user) => {
   if (user) {
@@ -804,6 +1251,352 @@ const processChatMessage = async (req, res) => {
     const user = req.user || null;
     const userName = user?.name ? user.name.split(' ')[0] : 'there';
     let bookingState = context?.bookingState || null;
+    let feedbackState = context?.feedbackState || null;
+    let rescheduleState = context?.rescheduleState || null;
+    let cancellationState = context?.cancellationState || null;
+
+    // ─────────────────────────────────────────────────────────────
+    // IN-CHAT CONVERSATIONAL FEEDBACK / REVIEW FLOW (Multi-step rating)
+    // ─────────────────────────────────────────────────────────────
+    if (feedbackState && (lower === 'cancel feedback' || lower === 'cancel' || lower === 'exit' || lower === 'stop' || lower === 'restart' || lower === '❌ cancel feedback' || lower === '❌ cancel')) {
+      return res.json({
+        reply: `🚫 Feedback submission has been cancelled. How else can I assist you today?`,
+        intent: 'feedback_cancelled',
+        quickReplies: ['🩺 Book Doctor Appointment', '🧪 Lab Tests & Pricing', '🔍 Track My Appointment', '🚨 Emergency Helpline'],
+        context: { ...context, feedbackState: null }
+      });
+    }
+
+    if (feedbackState) {
+      // Step 1: Rating selection (1-5 stars)
+      if (feedbackState.step === 'rating') {
+        let rating = null;
+        if (lower.includes('5') || lower.includes('⭐⭐⭐⭐⭐') || lower.includes('5 - excellent') || lower.includes('exceptional') || lower.includes('outstanding')) rating = 5;
+        else if (lower.includes('4') || lower.includes('⭐⭐⭐⭐') || lower.includes('4 - very good') || lower.includes('very good')) rating = 4;
+        else if (lower.includes('3') || lower.includes('⭐⭐⭐') || lower.includes('3 - good') || lower.includes('average')) rating = 3;
+        else if (lower.includes('2') || lower.includes('⭐⭐') || lower.includes('2 - fair') || lower.includes('below')) rating = 2;
+        else if (lower.includes('1') || lower.includes('⭐') || lower.includes('1 - poor') || lower.includes('needs improvement')) rating = 1;
+
+        if (!rating) {
+          return res.json({
+            reply: `⭐ Please select a valid star rating (1 to 5 stars) for Appointment #${feedbackState.appointmentNumber}:`,
+            intent: 'feedback_step_rating_retry',
+            quickReplies: [
+              '⭐⭐⭐⭐⭐ (5 - Excellent)',
+              '⭐⭐⭐⭐ (4 - Very Good)',
+              '⭐⭐⭐ (3 - Good)',
+              '⭐⭐ (2 - Fair)',
+              '⭐ (1 - Poor)',
+              '❌ Cancel Feedback'
+            ],
+            context: { ...context, feedbackState }
+          });
+        }
+
+        return res.json({
+          reply: `⭐ You selected **${rating} out of 5 stars** (${'⭐'.repeat(rating)})!\n\n` +
+            `💬 **Step 2 of 2: Would you like to add a review comment?**\n` +
+            `Type your thoughts about your doctor consultation, hospital cleanliness, or staff friendliness below (or click **"Skip Comment"** to submit right now):`,
+          intent: 'feedback_step_comment',
+          quickReplies: [
+            'Excellent consultation & caring doctor! ⭐',
+            'Very knowledgeable doctor and on-time service.',
+            'Clean hospital facilities & polite staff.',
+            'Smooth experience overall.',
+            'Skip Comment ⏭️',
+            '❌ Cancel Feedback'
+          ],
+          context: {
+            ...context,
+            feedbackState: {
+              ...feedbackState,
+              step: 'comment',
+              rating
+            }
+          }
+        });
+      }
+
+      // Step 2: Comment submission
+      if (feedbackState.step === 'comment') {
+        const isSkip = lower.includes('skip') || lower === 'skip comment' || lower === 'skip comment ⏭️';
+        const commentText = isSkip ? '' : text;
+
+        const appt = await findAppointmentByNumber(feedbackState.appointmentNumber) || {
+          id: feedbackState.appointmentId,
+          appointment_number: feedbackState.appointmentNumber,
+          hospital: feedbackState.hospital,
+          doctorName: feedbackState.doctorName,
+          patientName: feedbackState.patientName,
+          date: feedbackState.date
+        };
+
+        const savedFeedback = await saveChatbotFeedback({
+          appointment: appt,
+          user,
+          rating: feedbackState.rating,
+          feedbackText: commentText
+        });
+
+        return res.json({
+          reply: `🎉 **Thank You for Your Feedback!**\n\n` +
+            `Your **${feedbackState.rating} ⭐** review for **Appointment #${feedbackState.appointmentNumber}** (${feedbackState.hospital || 'Hospital'}) has been recorded and published!\n\n` +
+            `* ⭐ **Rating:** ${'⭐'.repeat(feedbackState.rating)} (${feedbackState.rating}/5 Stars)\n` +
+            (commentText ? `* 💬 **Review:** "${commentText}"\n` : '') +
+            `* 📊 **Status:** Published & shared with healthcare quality administration.\n\n` +
+            `Your review helps other patients and allows our medical staff to continuously provide outstanding patient care. How else may I assist you today?`,
+          intent: 'feedback_submitted',
+          feedback: savedFeedback,
+          quickReplies: [
+            '🩺 Book Another Appointment',
+            '📑 View My Appointments',
+            '🔍 Track Another Booking',
+            '🚨 Emergency Helpline'
+          ],
+          context: {
+            ...context,
+            feedbackState: null
+          }
+        });
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // IN-CHAT CONVERSATIONAL RESCHEDULING FLOW (Multi-step wizard)
+    // ─────────────────────────────────────────────────────────────
+    if (rescheduleState && (lower === 'cancel reschedule' || lower === 'cancel' || lower === 'exit' || lower === 'stop' || lower === '❌ cancel reschedule' || lower === '❌ cancel')) {
+      return res.json({
+        reply: `🚫 Rescheduling has been cancelled. Your appointment **#${rescheduleState.appointmentNumber}** remains active for **${rescheduleState.oldDate} @ ${rescheduleState.oldTime}**.`,
+        intent: 'reschedule_cancelled',
+        quickReplies: [`Track #${rescheduleState.appointmentNumber}`, 'Download Invoice PDF', 'View My Appointments', 'Contact Support'],
+        context: { ...context, rescheduleState: null }
+      });
+    }
+
+    if (rescheduleState) {
+      // Step 1: Date selection
+      if (rescheduleState.step === 'date') {
+        const today = new Date();
+        let selectedDate = null;
+        if (lower.includes('today')) {
+          selectedDate = today.toISOString().split('T')[0];
+        } else if (lower.includes('tomorrow')) {
+          const t = new Date(today);
+          t.setDate(t.getDate() + 1);
+          selectedDate = t.toISOString().split('T')[0];
+        } else if (lower.includes('day after tomorrow')) {
+          const t = new Date(today);
+          t.setDate(t.getDate() + 2);
+          selectedDate = t.toISOString().split('T')[0];
+        } else {
+          const dateMatch = text.match(/(\d{4}-\d{2}-\d{2})/);
+          if (dateMatch) {
+            selectedDate = dateMatch[1];
+          } else {
+            const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+            const foundDayIdx = days.findIndex(d => lower.includes(d));
+            if (foundDayIdx !== -1) {
+              const currentDay = today.getDay();
+              let diff = foundDayIdx - currentDay;
+              if (diff <= 0) diff += 7;
+              const target = new Date(today);
+              target.setDate(today.getDate() + diff);
+              selectedDate = target.toISOString().split('T')[0];
+            }
+          }
+        }
+
+        if (!selectedDate) {
+          const t = new Date(today);
+          t.setDate(t.getDate() + 1);
+          selectedDate = t.toISOString().split('T')[0];
+        }
+
+        const slotInfo = await getAvailableTimeSlots(selectedDate, rescheduleState.hospitalId, rescheduleState.hospital);
+        const slots = slotInfo.availableSlots || [];
+        const slotLabels = slots.map(s => s.label);
+
+        return res.json({
+          reply: `📅 **Rescheduling Appointment #${rescheduleState.appointmentNumber}**\n\n` +
+            `* 🏥 **Hospital:** ${rescheduleState.hospital || 'Hospital'}\n` +
+            `* 🩺 **Doctor / Service:** ${rescheduleState.doctorName || 'Consultation'}\n` +
+            `* 🗓️ **New Date Selected:** **${selectedDate}**\n\n` +
+            `⏰ **Step 2 of 2: Please select an available 30-minute time slot for ${selectedDate}:**`,
+          intent: 'reschedule_step_slot',
+          availableSlots: slotLabels,
+          quickReplies: [...slotLabels.slice(0, 6), '⬅️ Change Date', '❌ Cancel Reschedule'],
+          context: {
+            ...context,
+            rescheduleState: {
+              ...rescheduleState,
+              step: 'slot',
+              newDate: selectedDate
+            }
+          }
+        });
+      }
+
+      // Step 2: Time slot selection
+      if (rescheduleState.step === 'slot') {
+        if (lower.includes('change date') || lower.includes('back')) {
+          const nextDates = [];
+          for (let i = 1; i <= 4; i++) {
+            const d = new Date();
+            d.setDate(d.getDate() + i);
+            nextDates.push(d.toISOString().split('T')[0]);
+          }
+          return res.json({
+            reply: `📅 **Please choose your preferred new date for Appointment #${rescheduleState.appointmentNumber}:**`,
+            intent: 'reschedule_step_date',
+            quickReplies: ['Tomorrow', ...nextDates, '❌ Cancel Reschedule'],
+            context: {
+              ...context,
+              rescheduleState: {
+                ...rescheduleState,
+                step: 'date'
+              }
+            }
+          });
+        }
+
+        const timeMatch = text.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+        const newSlot = timeMatch ? timeMatch[1].toUpperCase() : text;
+
+        let updatedAppt = null;
+        if (supabase) {
+          try {
+            const { data } = await supabase
+              .from('appointments')
+              .update({ date: rescheduleState.newDate, time: newSlot })
+              .or(`id.eq.${rescheduleState.appointmentId},appointment_number.eq.${rescheduleState.appointmentNumber}`)
+              .select()
+              .single();
+            if (data) updatedAppt = data;
+          } catch (_) {}
+        }
+
+        const db = readDB();
+        db.appointments = db.appointments || [];
+        const apptIdx = db.appointments.findIndex(a => 
+          String(a.id) === String(rescheduleState.appointmentId) || 
+          Number(a.appointment_number) === Number(rescheduleState.appointmentNumber)
+        );
+        if (apptIdx !== -1) {
+          db.appointments[apptIdx].date = rescheduleState.newDate;
+          db.appointments[apptIdx].time = newSlot;
+          updatedAppt = db.appointments[apptIdx];
+        }
+        writeDB(db);
+
+        if (!updatedAppt) {
+          updatedAppt = {
+            id: rescheduleState.appointmentId,
+            appointment_number: rescheduleState.appointmentNumber,
+            patientName: rescheduleState.patientName,
+            hospital: rescheduleState.hospital,
+            doctorName: rescheduleState.doctorName,
+            date: rescheduleState.newDate,
+            time: newSlot,
+            status: 'Confirmed',
+            paymentStatus: 'Paid'
+          };
+        }
+
+        try {
+          broadcast('appointment_updated', updatedAppt);
+        } catch (_) {}
+
+        return res.json({
+          reply: `🎉 **Appointment #${rescheduleState.appointmentNumber} Rescheduled Successfully!**\n\n` +
+            `* 👤 **Patient:** ${rescheduleState.patientName}\n` +
+            `* 🏥 **Hospital:** ${rescheduleState.hospital}\n` +
+            `* 🩺 **Doctor / Service:** ${rescheduleState.doctorName}\n` +
+            `* 📅 **New Slot:** 🗓️ **${rescheduleState.newDate}** at ⏰ **${newSlot}** *(Previously: ${rescheduleState.oldDate} @ ${rescheduleState.oldTime})*\n` +
+            `* 📊 **Status:** 🟢 **Confirmed**\n\n` +
+            `Your booking has been updated in the hospital schedule. You can download the updated official tax invoice PDF below!`,
+          intent: 'reschedule_success',
+          appointment: updatedAppt,
+          quickReplies: [
+            `Track #${rescheduleState.appointmentNumber}`,
+            'Download Invoice PDF',
+            'Book Another Appointment',
+            'View My Appointments'
+          ],
+          action: {
+            type: 'download_invoice',
+            appointmentId: updatedAppt.id,
+            appointmentNumber: updatedAppt.appointment_number,
+            url: `/api/appointments/${updatedAppt.id}/invoice`,
+            label: '📄 Download Updated Invoice PDF'
+          },
+          context: {
+            ...context,
+            rescheduleState: null
+          }
+        });
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // IN-CHAT CONVERSATIONAL CANCELLATION FLOW
+    // ─────────────────────────────────────────────────────────────
+    if (cancellationState && (lower === 'no' || lower === 'keep appointment' || lower === 'don\'t cancel' || lower === 'dont cancel' || lower === '❌ keep booking' || lower === 'stop')) {
+      return res.json({
+        reply: `✅ Cancellation aborted. Your appointment **#${cancellationState.appointmentNumber}** remains active and confirmed!`,
+        intent: 'cancellation_aborted',
+        quickReplies: [`Track #${cancellationState.appointmentNumber}`, 'Download Invoice PDF', 'View My Appointments'],
+        context: { ...context, cancellationState: null }
+      });
+    }
+
+    if (cancellationState) {
+      if (cancellationState.step === 'confirm_reason') {
+        const reasonText = (text && !lower.includes('yes') && !lower.includes('confirm')) ? text : 'Cancelled by patient via chatbot';
+
+        const appt = await findAppointmentByNumber(cancellationState.appointmentNumber) || {
+          id: cancellationState.appointmentId,
+          appointment_number: cancellationState.appointmentNumber,
+          patientName: cancellationState.patientName,
+          hospital: cancellationState.hospital,
+          doctorName: cancellationState.doctorName,
+          date: cancellationState.date,
+          time: cancellationState.time,
+          paymentAmount: cancellationState.paymentAmount,
+          paymentStatus: 'Paid'
+        };
+
+        let cancelledResult = null;
+        try {
+          cancelledResult = await executeAppointmentCancellation({
+            appointment: appt,
+            reason: reasonText,
+            cancelledBy: 'patient_chatbot'
+          });
+        } catch (err) {
+          console.error('[chatbot] executeAppointmentCancellation error:', err);
+        }
+
+        const refundAmt = cancelledResult?.refundAmount || cancellationState.paymentAmount || 500;
+
+        return res.json({
+          reply: `❌ **Appointment #${cancellationState.appointmentNumber} Cancelled Successfully**\n\n` +
+            `* 👤 **Patient Name:** ${cancellationState.patientName}\n` +
+            `* 🏥 **Hospital:** ${cancellationState.hospital}\n` +
+            `* 🩺 **Doctor:** ${cancellationState.doctorName}\n` +
+            `* 📅 **Slot:** ${cancellationState.date} @ ${cancellationState.time}\n` +
+            `* 💰 **Refund Amount:** **₹${refundAmt}** (Status: **Refund Initiated**)\n` +
+            `* ℹ️ **Cancellation Reason:** *${reasonText}*\n\n` +
+            `💳 *Your refund has been initiated to your original payment method and will reflect within 2–4 business days.* How else may I assist you today?`,
+          intent: 'cancellation_success',
+          appointment: cancelledResult || { ...appt, status: 'Cancelled' },
+          quickReplies: ['Book New Appointment', 'Explore Lab Tests', 'View My Appointments', 'Talk to Support'],
+          context: {
+            ...context,
+            cancellationState: null
+          }
+        });
+      }
+    }
 
     // ─────────────────────────────────────────────────────────────
     // IN-CHAT CONVERSATIONAL BOOKING FLOW (Multi-step wizard)
@@ -1396,6 +2189,10 @@ const processChatMessage = async (req, res) => {
           paymentDetails,
           nextOptions,
           quickReplies: [
+            `⏱️ Live OPD Queue (#${savedAppt.appointment_number})`,
+            `🔄 Reschedule Slot (#${savedAppt.appointment_number})`,
+            '💊 Set Medicine Alarm',
+            '🥗 Diet & Recovery Care',
             '📄 Download Invoice PDF',
             '📋 What Documents to Bring',
             '🕒 Hospital Visiting Hours',
@@ -1412,6 +2209,702 @@ const processChatMessage = async (req, res) => {
           context: { bookingState: null }
         });
       }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 1A. APPOINTMENT VISIT FEEDBACK & DOCTOR REVIEW INTENT
+    // ─────────────────────────────────────────────────────────────
+    const isFeedbackQuery = (
+      lower.includes('feedback') ||
+      lower.includes('review') ||
+      lower.includes('rate doctor') ||
+      lower.includes('rate visit') ||
+      lower.includes('rate my visit') ||
+      lower.includes('rate appointment') ||
+      lower.includes('rate my appointment') ||
+      lower.includes('rate hospital') ||
+      lower.includes('give rating') ||
+      lower.includes('give review') ||
+      lower.includes('give feedback') ||
+      lower.includes('submit feedback') ||
+      lower.includes('doctor rating') ||
+      lower.includes('patient feedback') ||
+      lower.startsWith('⭐') ||
+      lower.startsWith('star')
+    );
+
+    if (isFeedbackQuery) {
+      const fbNumMatch = text.match(/(?:#|appointment\s*#?|ticket\s*#?|booking\s*#?|appt\s*#?)?\b(\d{4})\b/i);
+
+      if (fbNumMatch) {
+        const apptNum = fbNumMatch[1];
+        const appt = await findAppointmentByNumber(apptNum);
+
+        if (!appt) {
+          return res.json({
+            reply: `🔍 I searched for appointment number **#${apptNum}**, but couldn't find an active record in our database.\n\n` +
+              `* Please verify your 4-digit appointment reference number.\n` +
+              `* You can also check all your bookings in [My Appointments](/dashboard/my-appointments).`,
+            intent: 'feedback_appointment_not_found',
+            quickReplies: ['View My Appointments', 'Track My Appointment', 'Book Doctor Appointment'],
+            action: {
+              type: 'view_appointments',
+              url: '/dashboard/my-appointments',
+              label: '📑 Open My Appointments'
+            }
+          });
+        }
+
+        // Check if appointment is marked as Completed
+        if (appt.status !== 'Completed') {
+          return res.json({
+            reply: `⚠️ **Feedback is only available for Completed Appointments**\n\n` +
+              `Appointment **#${appt.appointment_number || appt.id}** is currently marked as **"${appt.status || 'Pending'}"**.\n\n` +
+              `* 💡 Hospital policy requires that consultations and hospital visits be marked as **Completed** by the doctor / hospital administration before patient feedback can be accepted.\n` +
+              `* Once your visit is marked as Completed, you can submit your rating and review directly in chat or from your patient dashboard!`,
+            intent: 'feedback_not_completed',
+            appointment: appt,
+            quickReplies: [
+              `Track #${appt.appointment_number || appt.id}`,
+              'Download Invoice PDF',
+              'View My Appointments',
+              'Contact Hospital Helpdesk'
+            ],
+            action: {
+              type: 'view_appointment',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number,
+              url: `/dashboard/my-appointments?id=${appt.id}`,
+              label: '📑 View in My Appointments'
+            }
+          });
+        }
+
+        // Appointment is Completed! Check if feedback is already submitted
+        const existingFb = await findFeedbackForAppointment(appt.id, appt.appointment_number);
+
+        if (existingFb) {
+          const stars = '⭐'.repeat(existingFb.rating || 5);
+          return res.json({
+            reply: `⭐ **Feedback Already Submitted for Appointment #${appt.appointment_number || appt.id}**\n\n` +
+              `You have already submitted a **${existingFb.rating} ⭐** review for your visit at **${appt.hospital || 'Hospital'}**:\n\n` +
+              `> ${stars} (${existingFb.rating}/5 Stars)\n` +
+              `> *"${existingFb.feedbacktext || 'Thank you for your rating!'}"*\n\n` +
+              `* 📅 **Visit Date:** ${appt.date || 'N/A'}\n` +
+              `* 📊 **Status:** Published & recorded in the hospital quality registry.\n\n` +
+              `Thank you for helping us maintain top healthcare standards! Is there anything else I can help you with?`,
+            intent: 'feedback_already_submitted',
+            appointment: appt,
+            existingFeedback: existingFb,
+            quickReplies: [
+              'Download Invoice PDF',
+              'Book Another Appointment',
+              'Explore Diagnostic Tests',
+              'View My Appointments'
+            ],
+            action: {
+              type: 'view_appointment',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number,
+              url: `/dashboard/my-appointments?id=${appt.id}`,
+              label: '📑 View Appointment Details'
+            }
+          });
+        }
+
+        // Feedback not yet submitted, start in-chat feedback flow
+        return res.json({
+          reply: `⭐ **Rate & Review Your Visit for Appointment #${appt.appointment_number || appt.id}**\n\n` +
+            `* 👤 **Patient Name:** ${appt.patientName || 'Patient'}\n` +
+            `* 🏥 **Hospital:** ${appt.hospital || 'MEDPARK Hospital'}\n` +
+            `* 🩺 **Doctor / Department:** ${appt.doctorName || appt.serviceName || appt.appointmentType || 'Doctor Consultation'}\n` +
+            `* 📅 **Visit Date:** **${appt.date || 'Completed'}** at ⏰ **${appt.time || 'N/A'}**\n\n` +
+            `🌟 **Step 1 of 2: How would you rate your overall consultation experience?**\n` +
+            `Please select your rating below (1 to 5 stars):`,
+          intent: 'feedback_prompt_rating',
+          appointment: appt,
+          quickReplies: [
+            '⭐⭐⭐⭐⭐ (5 - Excellent)',
+            '⭐⭐⭐⭐ (4 - Very Good)',
+            '⭐⭐⭐ (3 - Good)',
+            '⭐⭐ (2 - Fair)',
+            '⭐ (1 - Poor)',
+            '❌ Cancel Feedback'
+          ],
+          action: {
+            type: 'open_feedback_modal',
+            appointmentId: appt.id,
+            appointmentNumber: appt.appointment_number,
+            appointment: appt,
+            label: '⭐ Open Interactive Feedback Form'
+          },
+          context: {
+            ...context,
+            feedbackState: {
+              step: 'rating',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number,
+              hospital: appt.hospital,
+              doctorName: appt.doctorName || appt.serviceName || 'Doctor Consultation',
+              patientName: appt.patientName,
+              date: appt.date
+            }
+          }
+        });
+      }
+
+      // No appointment number specified in text, lookup user's appointments
+      const userAppts = await getUserAppointments(user);
+      const completedAppts = (userAppts || []).filter(a => a.status === 'Completed');
+
+      if (completedAppts.length === 0) {
+        if (userAppts && userAppts.length > 0) {
+          return res.json({
+            reply: `⚠️ **Feedback is only available for Completed Appointments**\n\n` +
+              `Your recent booking(s) (e.g. **#${userAppts[0].appointment_number || userAppts[0].id}**) are currently in **${userAppts[0].status || 'Pending'}** status.\n\n` +
+              `* Reviews and doctor ratings can only be submitted after your consultation is marked as **Completed** by the hospital admin.\n` +
+              `* If you have a specific 4-digit completed appointment reference number, reply with **\`Feedback #XXXX\`** (e.g. **\`Feedback #1042\`**).`,
+            intent: 'feedback_no_completed_appointments',
+            quickReplies: [
+              `Track #${userAppts[0].appointment_number || userAppts[0].id}`,
+              'View My Appointments',
+              'Book Doctor Appointment',
+              'Contact Helpdesk'
+            ],
+            action: {
+              type: 'view_appointments',
+              url: '/dashboard/my-appointments',
+              label: '📑 Go to My Appointments'
+            }
+          });
+        }
+
+        return res.json({
+          reply: `⭐ **Rate & Give Visit Feedback**\n\n` +
+            `To submit feedback for your completed consultation or diagnostic test, please reply with your **4-digit appointment reference number** (e.g. **\`Feedback #1042\`** or \`1042\`).\n\n` +
+            `* 💡 Note: Feedback can only be submitted for appointments marked as **Completed** by hospital administration.`,
+          intent: 'feedback_request_number',
+          quickReplies: ['View My Appointments', 'Track My Appointment', 'Book Doctor Appointment'],
+          action: {
+            type: 'view_appointments',
+            url: '/dashboard/my-appointments',
+            label: '📑 View My Appointments'
+          }
+        });
+      }
+
+      if (completedAppts.length === 1) {
+        const appt = completedAppts[0];
+        const existingFb = await findFeedbackForAppointment(appt.id, appt.appointment_number);
+
+        if (existingFb) {
+          const stars = '⭐'.repeat(existingFb.rating || 5);
+          return res.json({
+            reply: `⭐ **Feedback Already Submitted for Appointment #${appt.appointment_number || appt.id}**\n\n` +
+              `You have already submitted a **${existingFb.rating} ⭐** review for your visit at **${appt.hospital || 'Hospital'}**:\n\n` +
+              `> ${stars} (${existingFb.rating}/5 Stars)\n` +
+              `> *"${existingFb.feedbacktext || 'Thank you for your rating!'}"*\n\n` +
+              `Thank you for helping us maintain excellent patient care!`,
+            intent: 'feedback_already_submitted',
+            appointment: appt,
+            existingFeedback: existingFb,
+            quickReplies: ['Download Invoice PDF', 'Book Another Appointment', 'Explore Hospitals'],
+            action: {
+              type: 'view_appointment',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number,
+              url: `/dashboard/my-appointments?id=${appt.id}`,
+              label: '📑 View in My Appointments'
+            }
+          });
+        }
+
+        return res.json({
+          reply: `⭐ **Rate & Review Your Visit for Appointment #${appt.appointment_number || appt.id}**\n\n` +
+            `* 👤 **Patient Name:** ${appt.patientName || 'Patient'}\n` +
+            `* 🏥 **Hospital:** ${appt.hospital || 'MEDPARK Hospital'}\n` +
+            `* 🩺 **Doctor / Department:** ${appt.doctorName || appt.serviceName || appt.appointmentType || 'Doctor Consultation'}\n` +
+            `* 📅 **Visit Date:** **${appt.date || 'Completed'}** at ⏰ **${appt.time || 'N/A'}**\n\n` +
+            `🌟 **Step 1 of 2: How would you rate your overall consultation experience?**\n` +
+            `Please select your rating below (1 to 5 stars):`,
+          intent: 'feedback_prompt_rating',
+          appointment: appt,
+          quickReplies: [
+            '⭐⭐⭐⭐⭐ (5 - Excellent)',
+            '⭐⭐⭐⭐ (4 - Very Good)',
+            '⭐⭐⭐ (3 - Good)',
+            '⭐⭐ (2 - Fair)',
+            '⭐ (1 - Poor)',
+            '❌ Cancel Feedback'
+          ],
+          action: {
+            type: 'open_feedback_modal',
+            appointmentId: appt.id,
+            appointmentNumber: appt.appointment_number,
+            appointment: appt,
+            label: '⭐ Open Interactive Feedback Form'
+          },
+          context: {
+            ...context,
+            feedbackState: {
+              step: 'rating',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number,
+              hospital: appt.hospital,
+              doctorName: appt.doctorName || appt.serviceName || 'Doctor Consultation',
+              patientName: appt.patientName,
+              date: appt.date
+            }
+          }
+        });
+      }
+
+      // Multiple completed appointments: let user choose which one to review
+      const apptList = completedAppts.map(a => `* 🎟️ **#${a.appointment_number || a.id}** — 🏥 ${a.hospital || 'Hospital'} (${a.doctorName || a.serviceName || 'Consultation'}) on 📅 **${a.date}**`).join('\n');
+      return res.json({
+        reply: `⭐ **Select Completed Appointment to Review:**\n\n` +
+          `Here are your recent completed hospital visits eligible for feedback:\n\n` +
+          apptList +
+          `\n\nPlease select one below or reply with **\`Feedback #XXXX\`**:`,
+        intent: 'feedback_select_appointment',
+        quickReplies: completedAppts.slice(0, 3).map(a => `⭐ Give Feedback (#${a.appointment_number || a.id})`).concat(['❌ Cancel Feedback'])
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 1C. LIVE OPD TOKEN & WAITING QUEUE TRACKER INTENT
+    // ─────────────────────────────────────────────────────────────
+    const isQueueQuery = (
+      lower.includes('token') ||
+      lower.includes('queue') ||
+      lower.includes('waiting time') ||
+      lower.includes('wait time') ||
+      lower.includes('patients ahead') ||
+      lower.includes('opd queue') ||
+      lower.includes('opd status') ||
+      lower.includes('live queue') ||
+      lower.includes('my turn') ||
+      lower.startsWith('⏱️') ||
+      lower.startsWith('token')
+    );
+
+    if (isQueueQuery) {
+      const tokenNumMatch = text.match(/(?:#|appointment\s*#?|ticket\s*#?|token\s*#?|queue\s*#?)?\b(\d{4})\b/i);
+      let appt = null;
+
+      if (tokenNumMatch) {
+        appt = await findAppointmentByNumber(tokenNumMatch[1]);
+      } else {
+        const userAppts = await getUserAppointments(user);
+        appt = (userAppts || []).find(a => a.status !== 'Cancelled') || userAppts?.[0];
+      }
+
+      if (appt) {
+        if (appt.status === 'Cancelled') {
+          return res.json({
+            reply: `❌ Appointment **#${appt.appointment_number || appt.id}** was cancelled. Token tracker is only available for active consultations.`,
+            intent: 'token_appointment_cancelled',
+            quickReplies: ['Book New Appointment', 'View My Appointments']
+          });
+        }
+
+        const tokenData = calculateOPDToken(appt);
+
+        const reply = `⏱️ **Live OPD Token & Queue Status: #${tokenData.appointmentNumber}**\n\n` +
+          `* 🎫 **Your Token Number:** **Token #${tokenData.tokenNumber}**\n` +
+          `* 📢 **Currently Serving:** **Token #${tokenData.currentServing}**\n` +
+          `* 👥 **Patients Ahead of You:** **${tokenData.patientsAhead} patient${tokenData.patientsAhead === 1 ? '' : 's'}**\n` +
+          `* ⏳ **Estimated Wait Time:** **~${tokenData.estimatedWaitMins} mins**\n` +
+          `* 🩺 **Doctor / Service:** ${tokenData.doctorName}\n` +
+          `* 🚪 **Location:** **${tokenData.roomNumber}** (${tokenData.hospital})\n` +
+          `* 📅 **Slot:** ${tokenData.date} @ ${tokenData.time}\n` +
+          `* 📊 **Queue Status:** **${tokenData.statusLabel}**\n\n` +
+          `💡 *Please arrive at the OPD waiting lounge at least 10 minutes prior to your turn.*`;
+
+        return res.json({
+          reply,
+          intent: 'opd_token_status',
+          tokenData,
+          appointment: appt,
+          quickReplies: [
+            `🔄 Reschedule (#${tokenData.appointmentNumber})`,
+            `❌ Cancel (#${tokenData.appointmentNumber})`,
+            'Download Invoice PDF',
+            'View My Appointments'
+          ],
+          action: {
+            type: 'view_appointment',
+            appointmentId: appt.id,
+            appointmentNumber: appt.appointment_number,
+            url: `/dashboard/my-appointments?id=${appt.id}`,
+            label: '📑 View in Patient Portal'
+          }
+        });
+      } else {
+        return res.json({
+          reply: `⏱️ **Live OPD Token & Queue Tracker**\n\n` +
+            `Track your real-time consultation token number, room assignment, and estimated waiting time in chat!\n\n` +
+            `👉 Reply with your **4-digit appointment reference number** (e.g. **\`Token #1042\`** or \`1042\`) to view live queue progress.`,
+          intent: 'opd_token_prompt',
+          quickReplies: ['View My Appointments', 'Book Doctor Appointment', 'Contact Helpdesk']
+        });
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 1D. IN-CHAT APPOINTMENT RESCHEDULING INTENT
+    // ─────────────────────────────────────────────────────────────
+    const isRescheduleQuery = (
+      lower.includes('reschedule') ||
+      lower.includes('change date') ||
+      lower.includes('change time') ||
+      lower.includes('change slot') ||
+      lower.includes('postpone') ||
+      lower.includes('different date') ||
+      lower.includes('different time') ||
+      lower.startsWith('🔄')
+    );
+
+    if (isRescheduleQuery) {
+      const reschedNumMatch = text.match(/(?:#|appointment\s*#?|ticket\s*#?|reschedule\s*#?)?\b(\d{4})\b/i);
+      let appt = null;
+
+      if (reschedNumMatch) {
+        appt = await findAppointmentByNumber(reschedNumMatch[1]);
+      } else {
+        const userAppts = await getUserAppointments(user);
+        const activeAppts = (userAppts || []).filter(a => a.status !== 'Cancelled' && a.status !== 'Completed');
+        if (activeAppts.length === 1) {
+          appt = activeAppts[0];
+        } else if (activeAppts.length > 1) {
+          return res.json({
+            reply: `🔄 **Select Appointment to Reschedule:**\n\n` +
+              activeAppts.map(a => `* 🎟️ **#${a.appointment_number || a.id}** — 🏥 ${a.hospital || 'Hospital'} on 📅 **${a.date} @ ${a.time}**`).join('\n') +
+              `\n\nPlease select one below or reply with **\`Reschedule #XXXX\`**:`,
+            intent: 'reschedule_select_appointment',
+            quickReplies: activeAppts.slice(0, 3).map(a => `🔄 Reschedule (#${a.appointment_number || a.id})`).concat(['❌ Cancel'])
+          });
+        }
+      }
+
+      if (appt) {
+        if (appt.status === 'Cancelled') {
+          return res.json({
+            reply: `⚠️ Appointment **#${appt.appointment_number || appt.id}** has already been cancelled. Please book a fresh appointment instead.`,
+            intent: 'reschedule_already_cancelled',
+            quickReplies: ['Book New Appointment', 'View My Appointments']
+          });
+        }
+
+        if (appt.status === 'Completed') {
+          return res.json({
+            reply: `⚠️ Appointment **#${appt.appointment_number || appt.id}** is already completed. Would you like to schedule a follow-up consultation?`,
+            intent: 'reschedule_completed',
+            quickReplies: ['Book Follow-up Doctor', 'Rate Completed Visit', 'View My Appointments']
+          });
+        }
+
+        const nextDates = [];
+        for (let i = 1; i <= 4; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() + i);
+          nextDates.push(d.toISOString().split('T')[0]);
+        }
+
+        return res.json({
+          reply: `🔄 **Reschedule Appointment #${appt.appointment_number || appt.id}**\n\n` +
+            `* 👤 **Patient:** ${appt.patientName || 'Patient'}\n` +
+            `* 🏥 **Hospital:** ${appt.hospital || 'Hospital'}\n` +
+            `* 🩺 **Doctor / Service:** ${appt.doctorName || appt.serviceName || 'Consultation'}\n` +
+            `* 📅 **Current Slot:** **${appt.date}** @ ⏰ **${appt.time}**\n\n` +
+            `🗓️ **Step 1 of 2: Please choose your preferred new date:**`,
+          intent: 'reschedule_step_date',
+          quickReplies: ['Tomorrow', ...nextDates, '❌ Cancel Reschedule'],
+          context: {
+            ...context,
+            rescheduleState: {
+              step: 'date',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number || appt.id,
+              patientName: appt.patientName,
+              hospital: appt.hospital,
+              hospitalId: appt.hospitalId,
+              doctorName: appt.doctorName || appt.serviceName || 'Consultation',
+              oldDate: appt.date,
+              oldTime: appt.time
+            }
+          }
+        });
+      } else {
+        return res.json({
+          reply: `🔄 **Reschedule Appointment**\n\n` +
+            `You can easily change your appointment date and time slot with zero penalty fees.\n\n` +
+            `👉 Please reply with your **4-digit appointment reference number** (e.g. **\`Reschedule #1042\`** or \`1042\`).`,
+          intent: 'reschedule_prompt_number',
+          quickReplies: ['View My Appointments', 'Book Doctor Appointment', 'Contact Helpdesk']
+        });
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 1E. IN-CHAT 1-CLICK APPOINTMENT CANCELLATION INTENT
+    // ─────────────────────────────────────────────────────────────
+    const isCancelApptQuery = (
+      (lower.includes('cancel appointment') ||
+       lower.includes('cancel my appointment') ||
+       lower.includes('cancel booking') ||
+       lower.includes('cancel my booking') ||
+       lower.includes('abort appointment') ||
+       lower.includes('refund appointment') ||
+       (lower.includes('cancel') && (text.match(/\b\d{4}\b/) || lower.includes('#')))) &&
+      !lower.includes('cancel feedback') &&
+      !lower.includes('cancel reschedule')
+    );
+
+    if (isCancelApptQuery && !bookingState) {
+      const cancelNumMatch = text.match(/(?:#|appointment\s*#?|ticket\s*#?|cancel\s*#?)?\b(\d{4})\b/i);
+      let appt = null;
+
+      if (cancelNumMatch) {
+        appt = await findAppointmentByNumber(cancelNumMatch[1]);
+      } else {
+        const userAppts = await getUserAppointments(user);
+        const activeAppts = (userAppts || []).filter(a => a.status !== 'Cancelled' && a.status !== 'Completed');
+        if (activeAppts.length === 1) {
+          appt = activeAppts[0];
+        } else if (activeAppts.length > 1) {
+          return res.json({
+            reply: `❌ **Select Appointment to Cancel:**\n\n` +
+              activeAppts.map(a => `* 🎟️ **#${a.appointment_number || a.id}** — 🏥 ${a.hospital || 'Hospital'} on 📅 **${a.date} @ ${a.time}** (₹${a.paymentAmount || 500})`).join('\n') +
+              `\n\nPlease select one below or reply with **\`Cancel #XXXX\`**:`,
+            intent: 'cancel_select_appointment',
+            quickReplies: activeAppts.slice(0, 3).map(a => `❌ Cancel (#${a.appointment_number || a.id})`).concat(['Keep My Bookings'])
+          });
+        }
+      }
+
+      if (appt) {
+        if (appt.status === 'Cancelled') {
+          return res.json({
+            reply: `ℹ️ Appointment **#${appt.appointment_number || appt.id}** is already cancelled.\n\n* Refund Amount: **₹${appt.refundAmount || 0}** (${appt.refundStatus || 'Refunded'})`,
+            intent: 'cancellation_already_cancelled',
+            quickReplies: ['Book New Appointment', 'View My Appointments']
+          });
+        }
+
+        if (appt.status === 'Completed') {
+          return res.json({
+            reply: `⚠️ Completed appointments cannot be cancelled as consultation has already concluded.`,
+            intent: 'cancellation_completed',
+            quickReplies: ['Rate Completed Visit', 'Book Doctor Appointment', 'View My Appointments']
+          });
+        }
+
+        const refundAmt = appt.paymentAmount || appt.servicePrice || 500;
+
+        return res.json({
+          reply: `⚠️ **Confirm Cancellation for Appointment #${appt.appointment_number || appt.id}**\n\n` +
+            `* 👤 **Patient:** ${appt.patientName || 'Patient'}\n` +
+            `* 🏥 **Hospital:** ${appt.hospital || 'Hospital'}\n` +
+            `* 🩺 **Doctor / Service:** ${appt.doctorName || appt.serviceName || 'Consultation'}\n` +
+            `* 📅 **Slot:** **${appt.date}** @ ⏰ **${appt.time}**\n` +
+            `* 💰 **Eligible 100% Refund:** **₹${refundAmt}**\n\n` +
+            `🛡️ *Full refund will be initiated back to your original payment method.* Are you sure you want to cancel?`,
+          intent: 'cancellation_confirm_prompt',
+          quickReplies: [
+            '✅ Yes, Cancel & Refund',
+            '❌ Keep Booking',
+            'Change of Mind',
+            'Emergency Came Up',
+            'Doctor Unavailable'
+          ],
+          context: {
+            ...context,
+            cancellationState: {
+              step: 'confirm_reason',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number || appt.id,
+              patientName: appt.patientName,
+              hospital: appt.hospital,
+              doctorName: appt.doctorName || appt.serviceName || 'Consultation',
+              date: appt.date,
+              time: appt.time,
+              paymentAmount: refundAmt
+            }
+          }
+        });
+      } else {
+        return res.json({
+          reply: `❌ **Cancel Appointment & Request Refund**\n\n` +
+            `You can cancel any active booking with instant automated refund processing.\n\n` +
+            `👉 Please reply with your **4-digit appointment reference number** (e.g. **\`Cancel #1042\`** or \`1042\`).`,
+          intent: 'cancellation_prompt_number',
+          quickReplies: ['View My Appointments', 'Book Doctor Appointment', 'Contact Helpdesk']
+        });
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 1F. MEDICINE & PRESCRIPTION REMINDER ASSISTANT INTENT
+    // ─────────────────────────────────────────────────────────────
+    const isMedicineQuery = (
+      lower.includes('medicine') ||
+      lower.includes('medication') ||
+      lower.includes('prescription') ||
+      lower.includes('dosage') ||
+      lower.includes('pill') ||
+      lower.includes('drug') ||
+      lower.includes('reminder') ||
+      lower.includes('alarm') ||
+      lower.startsWith('💊') ||
+      MEDICINE_DATABASE.some(m => m.names.some(n => lower.includes(n)))
+    );
+
+    if (isMedicineQuery) {
+      // Check if user is asking about a specific medicine
+      const matchedDrug = MEDICINE_DATABASE.find(m => m.names.some(n => lower.includes(n)));
+
+      if (matchedDrug) {
+        const reply = `💊 **Clinical Drug Guide: ${matchedDrug.generic}**\n\n` +
+          `* 🏷️ **Category:** ${matchedDrug.category}\n` +
+          `* ⚖️ **Standard Dosage:** \`${matchedDrug.commonDosage}\`\n` +
+          `* ${matchedDrug.timing}\n\n` +
+          `📋 **Administration Instructions:**\n${matchedDrug.instructions}\n\n` +
+          `🛡️ **Clinical Precautions:**\n${matchedDrug.precautions}\n\n` +
+          `${matchedDrug.emergencyWarning}\n\n` +
+          `💡 *Would you like to set an interactive daily dosage reminder alarm for ${matchedDrug.generic}?*`;
+
+        return res.json({
+          reply,
+          intent: 'medicine_drug_info',
+          drug: matchedDrug,
+          quickReplies: [
+            `⏰ Set Reminder for ${matchedDrug.generic.split(' ')[0]}`,
+            '💊 View Other Medicines',
+            '🥗 View Care & Diet Plans',
+            'Book Doctor Consultation'
+          ],
+          action: {
+            type: 'open_reminder_modal',
+            medicineName: matchedDrug.generic,
+            defaultDosage: matchedDrug.commonDosage,
+            label: `⏰ Set Reminder for ${matchedDrug.generic.split(' ')[0]}`
+          }
+        });
+      }
+
+      // General medicine directory & reminder system
+      const drugList = MEDICINE_DATABASE.map(m => `* 💊 **${m.generic}** — *${m.category}* (${m.timing.split(' ')[0]})`).join('\n');
+
+      return res.json({
+        reply: `💊 **MediBot Medicine & Prescription Reminder Assistant**\n\n` +
+          `Access verified clinical drug information, dosage schedules, food timing, and set automated daily browser reminder alarms:\n\n` +
+          `${drugList}\n\n` +
+          `👉 *Click any medicine below or open the Reminder Assistant to set your customized daily medication alarms:*`,
+        intent: 'medicine_directory',
+        quickReplies: [
+          'Metformin (Diabetes)',
+          'Paracetamol (Fever/Pain)',
+          'Pantoprazole (Acidity/GERD)',
+          'Amoxicillin (Antibiotic)',
+          'Atorvastatin (Cholesterol)',
+          'Amlodipine (Blood Pressure)',
+          'Cetirizine (Allergy)',
+          'Azithromycin (Infection)'
+        ],
+        action: {
+          type: 'open_reminder_modal',
+          label: '💊 Open Medicine Alarm Assistant'
+        }
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 1G. PERSONALIZED DIET & POST-PROCEDURE CARE GUIDES INTENT
+    // ─────────────────────────────────────────────────────────────
+    const isDietQuery = (
+      lower.includes('diet') ||
+      lower.includes('food') ||
+      lower.includes('nutrition') ||
+      lower.includes('meal plan') ||
+      lower.includes('recovery guide') ||
+      lower.includes('post op') ||
+      lower.includes('post-op') ||
+      lower.includes('post-surgery') ||
+      lower.includes('post surgery') ||
+      lower.includes('care plan') ||
+      lower.includes('after surgery') ||
+      lower.includes('c-section') ||
+      lower.includes('cesarean') ||
+      lower.includes('angioplasty') ||
+      lower.includes('cardiac care') ||
+      lower.includes('diabetic diet') ||
+      lower.includes('renal') ||
+      lower.includes('kidney diet') ||
+      lower.includes('gerd') ||
+      lower.includes('acid reflux') ||
+      lower.startsWith('🥗')
+    );
+
+    if (isDietQuery) {
+      let matchedPlan = null;
+      if (lower.includes('diabet') || lower.includes('sugar') || lower.includes('glucose')) {
+        matchedPlan = DIET_AND_CARE_PLANS.find(p => p.id === 'diabetic');
+      } else if (lower.includes('cardiac') || lower.includes('heart') || lower.includes('angioplasty') || lower.includes('stent') || lower.includes('cholesterol')) {
+        matchedPlan = DIET_AND_CARE_PLANS.find(p => p.id === 'cardiac');
+      } else if (lower.includes('c-section') || lower.includes('cesarean') || lower.includes('maternity') || lower.includes('postpartum') || lower.includes('delivery') || lower.includes('lactation')) {
+        matchedPlan = DIET_AND_CARE_PLANS.find(p => p.id === 'maternity_csection');
+      } else if (lower.includes('ortho') || lower.includes('joint') || lower.includes('knee') || lower.includes('bone') || lower.includes('fracture') || lower.includes('hip')) {
+        matchedPlan = DIET_AND_CARE_PLANS.find(p => p.id === 'orthopedic');
+      } else if (lower.includes('renal') || lower.includes('kidney') || lower.includes('creatinine') || lower.includes('dialysis')) {
+        matchedPlan = DIET_AND_CARE_PLANS.find(p => p.id === 'renal');
+      } else if (lower.includes('gerd') || lower.includes('acid') || lower.includes('reflux') || lower.includes('gastrit') || lower.includes('heartburn') || lower.includes('ulcer')) {
+        matchedPlan = DIET_AND_CARE_PLANS.find(p => p.id === 'gerd');
+      }
+
+      if (matchedPlan) {
+        const recList = matchedPlan.recommended.map(r => `* ✅ ${r}`).join('\n');
+        const avoidList = matchedPlan.avoid.map(a => `* 🚫 ${a}`).join('\n');
+        const lifeList = matchedPlan.lifestyleTips.map(l => `* 🏃 ${l}`).join('\n');
+
+        const reply = `${matchedPlan.title}\n*Specialty Focus: ${matchedPlan.category}*\n\n` +
+          `📖 **Clinical Overview:**\n${matchedPlan.overview}\n\n` +
+          `🥗 **Recommended Foods to Include:**\n${recList}\n\n` +
+          `⚠️ **Foods & Habits to Strictly Avoid:**\n${avoidList}\n\n` +
+          `🏃 **Lifestyle & Rehabilitation Protocols:**\n${lifeList}\n\n` +
+          `${matchedPlan.warningSigns}`;
+
+        return res.json({
+          reply,
+          intent: 'diet_care_plan_details',
+          plan: matchedPlan,
+          quickReplies: [
+            '🥗 Other Diet Plans',
+            '💊 Medicine Reminder Assistant',
+            '🩺 Book Specialist Doctor',
+            '🧪 Book Blood Test'
+          ]
+        });
+      }
+
+      // General Diet & Care Plans Directory
+      const plansList = DIET_AND_CARE_PLANS.map(p => `* ${p.title}\n  📍 *${p.overview}*`).join('\n\n');
+
+      return res.json({
+        reply: `🥗 **Personalized Clinical Diet & Post-Procedure Care Guides**\n\n` +
+          `Choose an evidence-based clinical recovery nutrition plan curated by our department dietitians:\n\n` +
+          `${plansList}\n\n` +
+          `👉 *Select a care plan below to view recommended food lists and recovery protocols:*`,
+        intent: 'diet_plans_directory',
+        quickReplies: [
+          '🥗 Diabetic Wellness Plan',
+          '❤️ Cardiac & Heart Diet',
+          '🌸 Post-C-Section Recovery',
+          '🦴 Post-Joint & Bone Care',
+          '🫘 Renal Kidney Health Diet',
+          '🌿 Acid Reflux (GERD) Plan'
+        ]
+      });
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -1450,6 +2943,17 @@ const processChatMessage = async (req, res) => {
           const isConfirmed = appt.status === 'Confirmed';
           const statusEmoji = isCancelled ? '❌' : isCompleted ? '✅' : isConfirmed ? '🟢' : '⏳';
 
+          const existingFeedback = isCompleted ? await findFeedbackForAppointment(appt.id, appt.appointment_number) : null;
+
+          let feedbackNote = '';
+          if (isCompleted) {
+            if (existingFeedback) {
+              feedbackNote = `\n\n⭐ **Your Submitted Review:** ${'⭐'.repeat(existingFeedback.rating || 5)} (${existingFeedback.rating}/5 stars)\n> *"${existingFeedback.feedbacktext || 'Thank you for your valuable feedback!'}"*`;
+            } else {
+              feedbackNote = `\n\n🌟 **Your appointment has been marked as Completed!**\nHow was your consultation experience? You can submit your rating and review directly in chat or using the button below.`;
+            }
+          }
+
           const reply = `### ${statusEmoji} Appointment #${appt.appointment_number || appt.id} Details\n\n` +
             `* 👤 **Patient Name:** ${appt.patientName || 'N/A'}\n` +
             `* 🏥 **Hospital:** ${appt.hospital || 'MEDPARK Hospital'}\n` +
@@ -1458,19 +2962,33 @@ const processChatMessage = async (req, res) => {
             `* 📊 **Booking Status:** **${appt.status || 'Pending'}**\n` +
             `* 💳 **Payment Status:** ${String(appt.paymentStatus).toLowerCase() === 'paid' ? '💳 Paid (₹' + (appt.paymentAmount || appt.servicePrice || 500) + ')' : '⏳ Unpaid'}\n` +
             (isCancelled ? `\n> ℹ️ *Cancellation Reason: ${appt.cancellationReason || 'Cancelled by user'}* (Refund: ₹${appt.refundAmount || 0} - ${appt.refundStatus || 'Refunded'})` : '') +
+            feedbackNote +
             `\n\nYou can view full records, download the official tax invoice PDF, or manage this booking below:`;
+
+          const dynamicQuickReplies = [];
+          if (isCompleted && !existingFeedback) {
+            dynamicQuickReplies.push(`⭐ Give Feedback (#${appt.appointment_number || appt.id})`);
+          }
+          if (!isCancelled && !isCompleted) {
+            dynamicQuickReplies.push(`⏱️ OPD Queue (#${appt.appointment_number || appt.id})`);
+            dynamicQuickReplies.push(`🔄 Reschedule (#${appt.appointment_number || appt.id})`);
+            dynamicQuickReplies.push(`❌ Cancel (#${appt.appointment_number || appt.id})`);
+          }
+          dynamicQuickReplies.push('Download Invoice PDF', 'Book Another Appointment', 'Explore Diagnostic Tests', 'Contact Hospital Helpdesk');
 
           return res.json({
             reply,
             intent: 'track_appointment',
             appointment: appt,
-            quickReplies: [
-              'Download Invoice PDF',
-              'Book Another Appointment',
-              'Explore Diagnostic Tests',
-              'Contact Hospital Helpdesk'
-            ],
-            action: {
+            existingFeedback,
+            quickReplies: dynamicQuickReplies,
+            action: isCompleted && !existingFeedback ? {
+              type: 'open_feedback_modal',
+              appointmentId: appt.id,
+              appointmentNumber: appt.appointment_number,
+              appointment: appt,
+              label: '⭐ Rate & Give Visit Feedback'
+            } : {
               type: 'view_appointment',
               appointmentId: appt.id,
               appointmentNumber: appt.appointment_number,
@@ -1504,6 +3022,17 @@ const processChatMessage = async (req, res) => {
         const isConfirmed = latestAppt.status === 'Confirmed';
         const statusEmoji = isCancelled ? '❌' : isCompleted ? '✅' : isConfirmed ? '🟢' : '⏳';
 
+        const existingFeedback = isCompleted ? await findFeedbackForAppointment(latestAppt.id, latestAppt.appointment_number) : null;
+
+        let feedbackNote = '';
+        if (isCompleted) {
+          if (existingFeedback) {
+            feedbackNote = `\n\n⭐ **Your Submitted Review:** ${'⭐'.repeat(existingFeedback.rating || 5)} (${existingFeedback.rating}/5 stars)\n> *"${existingFeedback.feedbacktext || 'Thank you for your valuable feedback!'}"*`;
+          } else {
+            feedbackNote = `\n\n🌟 **Your appointment has been marked as Completed!**\nWould you like to share your review or rate your doctor?`;
+          }
+        }
+
         let otherList = '';
         if (userAppts.length > 1) {
           otherList = `\n\n📋 **Other Recent Bookings:**\n` +
@@ -1518,18 +3047,37 @@ const processChatMessage = async (req, res) => {
           `* 📊 **Booking Status:** **${latestAppt.status || 'Pending'}**\n` +
           `* 💳 **Payment Status:** ${String(latestAppt.paymentStatus).toLowerCase() === 'paid' ? '💳 Paid (₹' + (latestAppt.paymentAmount || latestAppt.servicePrice || 500) + ')' : '⏳ Unpaid'}\n` +
           (isCancelled ? `\n> ℹ️ *Cancellation Reason: ${latestAppt.cancellationReason || 'Cancelled by user'}* (Refund: ₹${latestAppt.refundAmount || 0})` : '') +
+          feedbackNote +
           otherList +
           `\n\nWould you like to open this booking in your portal or download your invoice PDF?`;
 
-        const dynamicQuickReplies = userAppts.slice(0, 2).map((a) => `Track #${a.appointment_number || a.id}`)
-          .concat(['Download Invoice PDF', 'Book Another Appointment', 'Explore Hospitals']);
+        const dynamicQuickReplies = [];
+        if (isCompleted && !existingFeedback) {
+          dynamicQuickReplies.push(`⭐ Give Feedback (#${latestAppt.appointment_number || latestAppt.id})`);
+        }
+        if (!isCancelled && !isCompleted) {
+          dynamicQuickReplies.push(`⏱️ OPD Queue (#${latestAppt.appointment_number || latestAppt.id})`);
+          dynamicQuickReplies.push(`🔄 Reschedule (#${latestAppt.appointment_number || latestAppt.id})`);
+          dynamicQuickReplies.push(`❌ Cancel (#${latestAppt.appointment_number || latestAppt.id})`);
+        }
+        userAppts.slice(0, 2).forEach((a) => {
+          if (a.id !== latestAppt.id) dynamicQuickReplies.push(`Track #${a.appointment_number || a.id}`);
+        });
+        dynamicQuickReplies.push('Download Invoice PDF', 'Book Another Appointment', 'Explore Hospitals');
 
         return res.json({
           reply,
           intent: 'track_appointment',
           appointment: latestAppt,
+          existingFeedback,
           quickReplies: dynamicQuickReplies,
-          action: {
+          action: isCompleted && !existingFeedback ? {
+            type: 'open_feedback_modal',
+            appointmentId: latestAppt.id,
+            appointmentNumber: latestAppt.appointment_number,
+            appointment: latestAppt,
+            label: '⭐ Rate & Give Visit Feedback'
+          } : {
             type: 'view_appointment',
             appointmentId: latestAppt.id,
             appointmentNumber: latestAppt.appointment_number,
@@ -1555,7 +3103,7 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 1B. INVOICE & RECEIPT DOWNLOAD INTENT
+    // 1H. INVOICE & RECEIPT DOWNLOAD INTENT
     // ─────────────────────────────────────────────────────────────
     if (
       lower.includes('download invoice') ||
@@ -1984,24 +3532,23 @@ const processChatMessage = async (req, res) => {
 // ─── Suggestions Endpoint ───────────────────────────────────────
 const getChatSuggestions = async (req, res) => {
   const suggestions = [
-    { title: 'How to Book Appointment', prompt: 'How do I book an appointment with a doctor?', icon: '🩺' },
-    { title: 'What Documents to Bring', prompt: 'What documents do I need to bring for my appointment?', icon: '📋' },
-    { title: 'Fasting for Blood Tests', prompt: 'Do I need to fast before a blood test?', icon: '🧪' },
-    { title: 'Full Body Health Checkups', prompt: 'What full body master health checkup packages do you offer?', icon: '💎' },
-    { title: 'Vaccination Schedules', prompt: 'Tell me about child and adult vaccination schedules', icon: '💉' },
-    { title: 'Maternity & Delivery Packages', prompt: 'What are the maternity and delivery packages?', icon: '🌸' },
-    { title: 'Home Blood Sample Collection', prompt: 'How can I book a blood test sample collection at home?', icon: '🏠' },
-    { title: 'Senior Citizen Care', prompt: 'What facilities and discounts are available for senior citizens?', icon: '👴' },
-    { title: 'Hospital Visiting Hours', prompt: 'What are the hospital visiting hours for patients?', icon: '🕒' },
-    { title: 'Doctor Consultation Fees', prompt: 'What are the doctor consultation fees by department?', icon: '💰' },
-    { title: 'Insurance & Cashless TPA', prompt: 'Do you accept health insurance and cashless Mediclaim?', icon: '🛡️' },
-    { title: 'Hospital Admission & Discharge', prompt: 'How does the hospital admission and discharge process work?', icon: '🛏️' },
-    { title: 'Physiotherapy & Rehab', prompt: 'What physiotherapy services are offered?', icon: '🏃' },
-    { title: 'Blood Donation & Blood Bank', prompt: 'How can I donate blood or check blood bank availability?', icon: '🩸' },
-    { title: 'Track My Booking', prompt: 'Track my appointment status', icon: '🔍' },
-    { title: 'Emergency Helplines', prompt: 'What are the 24/7 emergency contact numbers?', icon: '🚨' },
-    { title: 'Hospital Software Pricing', prompt: 'Tell me about hospital management subscription plans', icon: '💳' },
-    { title: 'Cancellation & Refunds', prompt: 'How does the cancellation and refund process work?', icon: '🔄' }
+    { title: '🔄 Reschedule Appointment', prompt: 'I want to reschedule my appointment', icon: '🔄' },
+    { title: '⏱️ Live OPD Queue Tracker', prompt: 'Track my live OPD token and waiting time', icon: '⏱️' },
+    { title: '💊 Medicine & Pill Alarms', prompt: 'Medicine and prescription reminder assistant', icon: '💊' },
+    { title: '🥗 Diet & Post-Op Care Plans', prompt: 'Tell me about diet and post-surgery recovery plans', icon: '🥗' },
+    { title: '⭐ Rate Completed Visit', prompt: 'I want to give feedback for my completed appointment', icon: '⭐' },
+    { title: '🔍 Track My Booking', prompt: 'Track my appointment status', icon: '🔍' },
+    { title: '🩺 How to Book Appointment', prompt: 'How do I book an appointment with a doctor?', icon: '🩺' },
+    { title: '📋 What Documents to Bring', prompt: 'What documents do I need to bring for my appointment?', icon: '📋' },
+    { title: '🧪 Fasting for Blood Tests', prompt: 'Do I need to fast before a blood test?', icon: '🧪' },
+    { title: '💎 Full Body Health Checkups', prompt: 'What full body master health checkup packages do you offer?', icon: '💎' },
+    { title: '💉 Vaccination Schedules', prompt: 'Tell me about child and adult vaccination schedules', icon: '💉' },
+    { title: '🌸 Maternity & Delivery Packages', prompt: 'What are the maternity and delivery packages?', icon: '🌸' },
+    { title: '🕒 Hospital Visiting Hours', prompt: 'What are the hospital visiting hours for patients?', icon: '🕒' },
+    { title: '💰 Doctor Consultation Fees', prompt: 'What are the doctor consultation fees by department?', icon: '💰' },
+    { title: '🛡️ Insurance & Cashless TPA', prompt: 'Do you accept health insurance and cashless Mediclaim?', icon: '🛡️' },
+    { title: '🚨 Emergency Helplines', prompt: 'What are the 24/7 emergency contact numbers?', icon: '🚨' },
+    { title: '💳 Cancellation & 100% Refunds', prompt: 'Cancel my appointment and process refund', icon: '❌' }
   ];
 
   return res.json({ suggestions });

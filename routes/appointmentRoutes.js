@@ -5,6 +5,7 @@ const {
   bookAppointment,
   bookPublicAppointment,
   getAppointments,
+  getAppointmentById,
   updateAppointmentStatus,
   updateAppointment,
   cancelAppointment,
@@ -27,6 +28,7 @@ router.post('/public', bookPublicAppointment);
 router.get('/by-number/:number', getAppointmentByNumber);
 router.get('/:id/invoice', downloadAppointmentInvoice);
 router.get('/:id/cancellation-invoice', downloadCancellationInvoice);
+router.get('/:id', getAppointmentById);
 
 // Public "manage my booking" — ownership proven by mobile + email in the body
 router.post('/lookup', lookupAppointments);

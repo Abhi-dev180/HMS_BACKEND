@@ -101,7 +101,7 @@ const fs = require('fs');
 const generateInvoice = (data) => {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const doc = new PDFDocument({ size: 'A4', margins: { top: 0, bottom: 0, left: 0, right: 0 } });
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => {
@@ -211,22 +211,21 @@ const generateInvoice = (data) => {
          .text(`$${((data.amount || 0) / 100).toFixed(2)}`, 395, totalY + 24, { align: 'right', width: 150 });
 
       // ---------- Footer ----------
+      doc.strokeColor('#e5e7eb')
+         .lineWidth(1)
+         .moveTo(40, doc.page.height - 50)
+         .lineTo(doc.page.width - 40, doc.page.height - 50)
+         .stroke();
+
       doc.fillColor('#9ca3af')
          .fontSize(9)
          .font('Helvetica')
          .text(
            'Thank you for your business. If you have any questions, please contact support.',
            40,
-           doc.page.height - 50,
-           { align: 'center', width: 520 }
+           doc.page.height - 38,
+           { align: 'center', width: doc.page.width - 80, lineBreak: false }
          );
-
-      // Small horizontal line above footer
-      doc.strokeColor('#e5e7eb')
-         .lineWidth(1)
-         .moveTo(40, doc.page.height - 60)
-         .lineTo(560, doc.page.height - 60)
-         .stroke();
 
       doc.end();
     } catch (err) {
@@ -244,7 +243,7 @@ const generateInvoice = (data) => {
 const generateAppointmentInvoice = (data) => {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const doc = new PDFDocument({ size: 'A4', margins: { top: 0, bottom: 0, left: 0, right: 0 } });
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => {
@@ -490,8 +489,8 @@ const generateAppointmentInvoice = (data) => {
       // ─── Footer ────────────────────────────────────────────────────
       doc.strokeColor('#e2e8f0')
          .lineWidth(1)
-         .moveTo(40, doc.page.height - 45)
-         .lineTo(doc.page.width - 40, doc.page.height - 45)
+         .moveTo(40, doc.page.height - 42)
+         .lineTo(doc.page.width - 40, doc.page.height - 42)
          .stroke();
 
       doc.fillColor('#94a3b8')
@@ -500,8 +499,8 @@ const generateAppointmentInvoice = (data) => {
          .text(
            'This is a computer-generated invoice and receipt from MEDPARK Hospital Management System. For inquiries, email support@medpark.com.',
            40,
-           doc.page.height - 35,
-           { align: 'center', width: doc.page.width - 80 }
+           doc.page.height - 32,
+           { align: 'center', width: doc.page.width - 80, lineBreak: false }
          );
 
       doc.end();
@@ -520,7 +519,7 @@ const generateAppointmentInvoice = (data) => {
 const generateCancellationInvoice = (data) => {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const doc = new PDFDocument({ size: 'A4', margins: { top: 0, bottom: 0, left: 0, right: 0 } });
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => {
@@ -784,8 +783,8 @@ const generateCancellationInvoice = (data) => {
       // ─── Footer ────────────────────────────────────────────────────
       doc.strokeColor('#e2e8f0')
          .lineWidth(1)
-         .moveTo(40, doc.page.height - 45)
-         .lineTo(doc.page.width - 40, doc.page.height - 45)
+         .moveTo(40, doc.page.height - 42)
+         .lineTo(doc.page.width - 40, doc.page.height - 42)
          .stroke();
 
       doc.fillColor('#94a3b8')
@@ -794,8 +793,8 @@ const generateCancellationInvoice = (data) => {
          .text(
            'This is an official cancellation credit note & tax receipt from MEDPARK Hospital Management System. Generated electronically.',
            40,
-           doc.page.height - 35,
-           { align: 'center', width: doc.page.width - 80 }
+           doc.page.height - 32,
+           { align: 'center', width: doc.page.width - 80, lineBreak: false }
          );
 
       doc.end();

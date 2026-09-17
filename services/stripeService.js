@@ -236,8 +236,8 @@ const createAppointmentCheckoutSession = async ({ bookingDetails, appointmentId,
       isLab: String(isLab)
     },
     customer_email: bookingDetails?.email || undefined,
-    success_url: `${baseUrl}/dashboard/my-appointments?type=appointment&payment=success&session_id={CHECKOUT_SESSION_ID}&appointment_id=${safeApptId}`,
-    cancel_url: `${baseUrl}/dashboard/my-appointments?type=appointment&payment=cancelled&session_id={CHECKOUT_SESSION_ID}&appointment_id=${safeApptId}`
+    success_url: `${bookingDetails?.returnUrl || `${baseUrl}/appointment`}?type=appointment&payment=success&session_id={CHECKOUT_SESSION_ID}&appointment_id=${safeApptId}&appointment_number=${safeApptNumber}`,
+    cancel_url: `${bookingDetails?.returnUrl || `${baseUrl}/appointment`}?type=appointment&payment=cancelled&session_id={CHECKOUT_SESSION_ID}&appointment_id=${safeApptId}`
   });
 
   return session;

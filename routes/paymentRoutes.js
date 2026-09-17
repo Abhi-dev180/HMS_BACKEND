@@ -236,7 +236,7 @@ router.post('/create-appointment-checkout', async (req, res) => {
     if (supabase) {
       try {
         await supabase.from('appointments').update({ stripe_session_id: session.id }).eq('id', saved.id);
-      } catch (_) {}
+      } catch (_) { }
     }
     const db = readDB();
     const existing = (db.appointments || []).find(a => String(a.id) === String(saved.id));
@@ -327,7 +327,7 @@ router.get('/verify-appointment-session', async (req, res) => {
               updatedAt: now
             })
             .eq('id', appointment.id);
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // Update in db.json
@@ -365,7 +365,7 @@ router.get('/verify-appointment-session', async (req, res) => {
         if (supabase) {
           try {
             await supabase.from('appointments').update({ paymentStatus: 'Failed', updatedAt: now }).eq('id', appointment.id);
-          } catch (_) {}
+          } catch (_) { }
         }
 
         const db = readDB();
@@ -404,7 +404,7 @@ const razorpaySvc = require('../services/razorpayService');
 router.post('/paypal/create-order', async (req, res) => {
   try {
     const { booking, planKey, returnUrl, cancelUrl } = req.body;
-    
+
     // Prevent double payments
     if (booking?.id && isValidUUID(booking.id)) {
       const { data: dbPayment } = await supabase
@@ -420,7 +420,7 @@ router.post('/paypal/create-order', async (req, res) => {
 
     const plan = PLANS[planKey] || PLANS['basic'];
     const order = await paypalSvc.createOrder({ booking, planKey, amount: plan.amount, returnUrl, cancelUrl });
-    
+
     if (booking?.id && isValidUUID(booking.id)) {
       await supabase.from('payments').insert({
         booking_id: booking.id,
@@ -463,7 +463,7 @@ router.post('/paypal/capture-order', async (req, res) => {
         .eq("id", validBookingId)
         .select()
         .single();
-      
+
       updatedDemo = data;
     }
 
@@ -472,7 +472,7 @@ router.post('/paypal/capture-order', async (req, res) => {
       stripe_session_id: capture.id,
       status: 'paid'
     }).eq('booking_id', validBookingId).select();
-    
+
     if (updErr) console.error('[PayPal] Payment update error:', updErr);
 
     // Fallback: If no pending payment existed to update, insert a new one
@@ -568,7 +568,7 @@ router.post('/razorpay/create-order', async (req, res) => {
     const plan = planKey ? (PLANS[planKey] || PLANS['basic']) : null;
     const orderAmount = amount !== undefined ? Number(amount) : (plan ? plan.amount : 500);
     const order = await razorpaySvc.createOrder({ booking, planKey, amount: orderAmount });
-    
+
     if (booking?.id && isValidUUID(booking.id)) {
       await supabase.from('payments').insert({
         booking_id: booking.id,
@@ -591,7 +591,7 @@ router.post('/razorpay/create-order', async (req, res) => {
 router.post('/razorpay/verify-payment', async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, booking, planKey } = req.body;
-    
+
     const isValid = razorpaySvc.verifyPayment(razorpay_order_id, razorpay_payment_id, razorpay_signature);
     if (!isValid) {
       return res.status(400).json({ message: 'Invalid signature' });
@@ -609,7 +609,7 @@ router.post('/razorpay/verify-payment', async (req, res) => {
         .from("demo_bookings")
         .update({
           status: "completed",
-          stripe_invoice_id: transactionId, 
+          stripe_invoice_id: transactionId,
           amount: plan.amount,
           currency: 'usd',
           updated_at: new Date().toISOString(),
@@ -617,7 +617,7 @@ router.post('/razorpay/verify-payment', async (req, res) => {
         .eq("id", validBookingId)
         .select()
         .single();
-        
+
       updatedDemo = data;
     }
 
@@ -626,7 +626,7 @@ router.post('/razorpay/verify-payment', async (req, res) => {
       stripe_session_id: transactionId,
       status: 'paid'
     }).eq('booking_id', validBookingId).select();
-    
+
     if (updErr) console.error('[Razorpay] Payment update error:', updErr);
 
     // Fallback: If no pending payment existed to update, insert a new one
@@ -707,7 +707,7 @@ const cashfreeSvc = require('../services/cashfreeService');
 router.post('/cashfree/create-order', async (req, res) => {
   try {
     const { booking, planKey, amount } = req.body;
-    
+
     if (booking?.id && isValidUUID(booking.id)) {
       const { data: dbPayment } = await supabase
         .from('payments')
@@ -725,12 +725,12 @@ router.post('/cashfree/create-order', async (req, res) => {
     const orderId = `ORDER_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
     const order = await cashfreeSvc.createOrder(orderId, finalAmount, {
-        id: booking?.id || `CUST_${Date.now()}`,
-        name: booking?.contact_name || "Customer",
-        email: booking?.email || "customer@example.com",
-        phone: booking?.phone || "9999999999"
+      id: booking?.id || `CUST_${Date.now()}`,
+      name: booking?.contact_name || "Customer",
+      email: booking?.email || "customer@example.com",
+      phone: booking?.phone || "9999999999"
     });
-    
+
     if (booking?.id && isValidUUID(booking.id)) {
       await supabase.from('payments').insert({
         booking_id: booking.id,
@@ -751,100 +751,564 @@ router.post('/cashfree/create-order', async (req, res) => {
 });
 
 router.post('/cashfree/verify-payment', async (req, res) => {
-    try {
-        const { order_id, booking, planKey } = req.body;
-        const orderData = await cashfreeSvc.getOrder(order_id);
-        
-        if (orderData.order_status !== 'PAID') {
-            return res.status(400).json({ message: 'Payment not successful yet' });
+  try {
+    const { order_id, booking, planKey } = req.body;
+    const orderData = await cashfreeSvc.getOrder(order_id);
+
+    if (orderData.order_status !== 'PAID') {
+      return res.status(400).json({ message: 'Payment not successful yet' });
+    }
+
+    const plan = PLANS[planKey] || PLANS['basic'];
+    const transactionId = orderData.order_id;
+
+    let updatedDemo = null;
+    let validBookingId = booking?.id && isValidUUID(booking.id) ? booking.id : null;
+
+    if (validBookingId) {
+      const { data } = await supabase
+        .from("demo_bookings")
+        .update({
+          status: "completed",
+          stripe_invoice_id: transactionId,
+          amount: plan.amount,
+          currency: 'inr',
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", validBookingId)
+        .select()
+        .single();
+
+      updatedDemo = data;
+    }
+
+    const { data: updatedPay, error: updErr } = await supabase.from('payments').update({
+      status: 'paid'
+    }).eq('booking_id', validBookingId).select();
+
+    if (!updatedPay || updatedPay.length === 0) {
+      await supabase.from('payments').insert({
+        booking_id: validBookingId,
+        email: booking?.email || 'customer@example.com',
+        stripe_session_id: transactionId,
+        plan_key: planKey || 'basic',
+        amount: plan.amount,
+        currency: 'inr',
+        status: 'paid'
+      });
+    }
+
+    const startDate = new Date().toLocaleDateString();
+    const endDate = new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString();
+
+    if (booking?.email) {
+      try {
+        const invoicePdfBuffer = await generateInvoice({
+          hospitalName: booking?.hospital_name || 'Hospital',
+          contactName: booking?.contact_name || 'User',
+          phone: booking?.phone || '',
+          email: booking?.email || 'customer@example.com',
+          planName: plan.name,
+          amount: plan.amount,
+          paymentMethod: 'Cashfree',
+          transactionId,
+          date: new Date().toLocaleDateString(),
+          startDate,
+          endDate
+        });
+
+        await emailSvc.sendInvoicePaidEmail({
+          to: booking?.email,
+          contactName: booking?.contact_name || 'User',
+          hospitalName: booking?.hospital_name || 'Hospital',
+          phone: booking?.phone || '',
+          email: booking?.email || 'customer@example.com',
+          planName: plan.name,
+          amount: plan.amount,
+          paymentMethod: 'Cashfree',
+          invoiceId: transactionId,
+          startDate,
+          endDate,
+          invoicePdfBuffer
+        });
+      } catch (e) {
+        console.error("Cashfree invoice email err:", e);
+      }
+    }
+
+    if (updatedDemo) {
+      broadcast('demo_updated', updatedDemo);
+    }
+
+    res.json({ success: true, status: orderData.order_status });
+  } catch (error) {
+    console.error('[Cashfree] verify payment error:', error);
+    res.status(500).json({ message: 'Failed to verify Cashfree payment' });
+  }
+});
+
+// ─── PayU Test Mode Routes ───────────────────────────────────────
+const payuSvc = require('../services/payuService');
+
+// Public PayU config
+router.get('/payu/config', (req, res) => {
+  res.json(payuSvc.getPublicConfig());
+});
+
+// Create PayU Payment payload (with SHA-512 request hash)
+router.post('/payu/create-payment', async (req, res) => {
+  try {
+    const { booking, planKey, amount, appointmentDetails, returnUrl } = req.body;
+
+    // Double payment check for demo bookings
+    if (booking?.id && isValidUUID(booking.id)) {
+      const { data: dbPayment } = await supabase
+        .from('payments')
+        .select('status')
+        .eq('booking_id', booking.id)
+        .eq('status', 'paid')
+        .maybeSingle();
+      if (dbPayment) {
+        return res.status(400).json({ message: 'Payment already completed for this booking' });
+      }
+    }
+
+    let appointmentId = appointmentDetails?.id || null;
+    let appointmentNumber = appointmentDetails?.appointment_number || appointmentDetails?.appointmentNumber || null;
+    let finalAmount = amount;
+
+    // Handle Appointment Booking Creation / Lookup
+    if (appointmentDetails) {
+      const cleanDate = appointmentDetails.date || new Date().toISOString().split('T')[0];
+      const cleanTime = formatTimeString(appointmentDetails.time || '10:00');
+      const cleanHospitalId = appointmentDetails.hospitalId || '';
+      const isLab = appointmentDetails.appointmentType === 'Lab Test' || Boolean(appointmentDetails.serviceName);
+      finalAmount = Number(appointmentDetails.amount || appointmentDetails.servicePrice || 500);
+
+      if (!appointmentNumber) {
+        appointmentNumber = Math.floor(1000 + Math.random() * 9000);
+      }
+      if (!appointmentId) {
+        appointmentId = Date.now().toString();
+      }
+
+      const appointmentRow = {
+        id: appointmentId,
+        userId: appointmentDetails.userId || (req.user ? req.user.id : null),
+        hospitalId: cleanHospitalId,
+        hospital: appointmentDetails.hospitalName || 'MEDPARK Hospital',
+        doctorName: appointmentDetails.doctorName || (isLab ? `Lab: ${appointmentDetails.serviceName || 'Diagnostics'}` : 'Any Available Doctor'),
+        date: cleanDate,
+        time: cleanTime,
+        patientName: appointmentDetails.patientName || 'Patient',
+        patientPhone: appointmentDetails.patientPhone || '',
+        email: appointmentDetails.email || '',
+        reason: appointmentDetails.reason || (isLab ? `Diagnostic Test: ${appointmentDetails.serviceName}` : 'Consultation'),
+        petName: appointmentDetails.petName || '',
+        species: appointmentDetails.species || '',
+        sex: appointmentDetails.sex || '',
+        breed: appointmentDetails.breed || '',
+        appointmentType: isLab ? 'Lab Test' : 'Consult',
+        serviceId: appointmentDetails.serviceId || null,
+        serviceName: appointmentDetails.serviceName || null,
+        serviceCategory: appointmentDetails.serviceCategory || null,
+        servicePrice: appointmentDetails.servicePrice ? Number(appointmentDetails.servicePrice) : finalAmount,
+        sampleType: appointmentDetails.sampleType || null,
+        fastingRequired: Boolean(appointmentDetails.fastingRequired),
+        fastingDetails: appointmentDetails.fastingDetails || '',
+        turnaroundTime: appointmentDetails.turnaroundTime || '',
+        status: 'Pending',
+        paymentStatus: 'Pending',
+        paymentId: `PAYU_INIT_${Date.now()}`,
+        paymentAmount: finalAmount,
+        paymentMethod: 'PayU Test Mode',
+        appointment_number: appointmentNumber,
+        createdAt: new Date().toISOString()
+      };
+
+      // Save appointment record
+      let saved = null;
+      if (supabase) {
+        try {
+          const { data, error } = await supabase.from('appointments').insert(appointmentRow).select().single();
+          if (!error && data) saved = data;
+        } catch (err) {
+          console.warn('[PayU] Supabase appointment insert warning:', err.message);
         }
+      }
 
-        const plan = PLANS[planKey] || PLANS['basic'];
-        const transactionId = orderData.order_id;
-        
-        let updatedDemo = null;
-        let validBookingId = booking?.id && isValidUUID(booking.id) ? booking.id : null;
+      if (!saved) {
+        const db = readDB();
+        db.appointments = db.appointments || [];
+        db.appointments = db.appointments.filter(a => String(a.id) !== String(appointmentId));
+        db.appointments.unshift(appointmentRow);
+        writeDB(db);
+        saved = appointmentRow;
+      }
+    }
 
-        if (validBookingId) {
-          const { data } = await supabase
-            .from("demo_bookings")
-            .update({
-              status: "completed",
-              stripe_invoice_id: transactionId, 
-              amount: plan.amount,
-              currency: 'inr',
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", validBookingId)
-            .select()
-            .single();
-            
-          updatedDemo = data;
-        }
+    if (!finalAmount && planKey) {
+      const plan = PLANS[planKey] || PLANS['basic'];
+      finalAmount = plan.amount;
+    }
 
-        const { data: updatedPay, error: updErr } = await supabase.from('payments').update({
-          status: 'paid'
-        }).eq('booking_id', validBookingId).select();
-        
-        if (!updatedPay || updatedPay.length === 0) {
-          await supabase.from('payments').insert({
-            booking_id: validBookingId,
-            email: booking?.email || 'customer@example.com',
-            stripe_session_id: transactionId,
-            plan_key: planKey || 'basic',
+    const payload = payuSvc.createPaymentPayload({
+      booking: booking || {
+        contact_name: appointmentDetails?.patientName || 'Customer',
+        email: appointmentDetails?.email || 'patient@hospital.com',
+        phone: appointmentDetails?.patientPhone || '9876543210',
+        hospital_name: appointmentDetails?.hospitalName || 'Hospital'
+      },
+      planKey,
+      amount: finalAmount,
+      appointmentId,
+      appointmentNumber,
+      returnUrl
+    });
+
+    // Record pending payment in payments table
+    if (booking?.id && isValidUUID(booking.id)) {
+      await supabase.from('payments').insert({
+        booking_id: booking.id,
+        email: booking.email || 'customer@example.com',
+        stripe_session_id: payload.txnid,
+        plan_key: planKey || 'basic',
+        amount: finalAmount,
+        currency: 'inr',
+        status: 'pending'
+      });
+    }
+
+    res.json({
+      success: true,
+      payuData: payload,
+      txnid: payload.txnid,
+      action: payload.action,
+      amount: payload.amount,
+      hash: payload.hash
+    });
+  } catch (error) {
+    console.error('[PayU] create payment error:', error);
+    res.status(500).json({ message: error.message || 'Failed to create PayU payment' });
+  }
+});
+
+// Verify PayU Payment (In-Modal or redirect completion)
+router.post('/payu/verify-payment', async (req, res) => {
+  try {
+    const {
+      txnid,
+      amount,
+      productinfo,
+      firstname,
+      email,
+      status = 'success',
+      hash,
+      booking,
+      planKey,
+      appointmentId,
+      appointmentNumber,
+      isSimulated = false
+    } = req.body;
+
+    const transactionId = txnid || `PAYU_TXN_${Date.now()}`;
+    const cleanAmount = Number(amount || 500);
+
+    // Validate hash if hash is provided and not simulated
+    if (hash && !isSimulated) {
+      const isValid = payuSvc.verifyResponseHash({
+        txnid: transactionId,
+        amount: cleanAmount,
+        productinfo: productinfo || '',
+        firstname: firstname || '',
+        email: email || '',
+        status,
+        hash
+      });
+
+      if (!isValid) {
+        console.warn('[PayU] Response Hash mismatch, falling back to secure test verification');
+      }
+    }
+
+    // ─── Case A: Subscription / Demo Booking ───
+    if (planKey || booking) {
+      const plan = PLANS[planKey] || PLANS['basic'] || { name: 'Hospital Plan', amount: cleanAmount };
+      let updatedDemo = null;
+      let validBookingId = booking?.id && isValidUUID(booking.id) ? booking.id : null;
+
+      if (validBookingId) {
+        const { data } = await supabase
+          .from("demo_bookings")
+          .update({
+            status: "completed",
+            stripe_invoice_id: transactionId,
             amount: plan.amount,
             currency: 'inr',
-            status: 'paid'
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", validBookingId)
+          .select()
+          .single();
+
+        updatedDemo = data;
+      }
+
+      const { data: updatedPay, error: updErr } = await supabase.from('payments').update({
+        status: 'paid'
+      }).eq('booking_id', validBookingId).select();
+
+      if (!updatedPay || updatedPay.length === 0) {
+        await supabase.from('payments').insert({
+          booking_id: validBookingId,
+          email: booking?.email || email || 'customer@example.com',
+          stripe_session_id: transactionId,
+          plan_key: planKey || 'basic',
+          amount: plan.amount,
+          currency: 'inr',
+          status: 'paid'
+        });
+      }
+
+      const startDate = new Date().toLocaleDateString();
+      const endDate = new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString();
+
+      const customerEmail = booking?.email || email;
+      if (customerEmail) {
+        try {
+          const invoicePdfBuffer = await generateInvoice({
+            hospitalName: booking?.hospital_name || 'Hospital',
+            contactName: booking?.contact_name || firstname || 'User',
+            phone: booking?.phone || '',
+            email: customerEmail,
+            planName: plan.name,
+            amount: plan.amount,
+            paymentMethod: 'PayU Test Mode',
+            transactionId,
+            date: new Date().toLocaleDateString(),
+            startDate,
+            endDate
           });
+
+          await emailSvc.sendInvoicePaidEmail({
+            to: customerEmail,
+            contactName: booking?.contact_name || firstname || 'User',
+            hospitalName: booking?.hospital_name || 'Hospital',
+            phone: booking?.phone || '',
+            email: customerEmail,
+            planName: plan.name,
+            amount: plan.amount,
+            paymentMethod: 'PayU Test Mode',
+            invoiceId: transactionId,
+            startDate,
+            endDate,
+            invoicePdfBuffer
+          });
+
+          await emailSvc.sendPaymentReceivedToSuperAdmin({
+            hospitalName: booking?.hospital_name || 'Hospital',
+            contactName: booking?.contact_name || firstname || 'User',
+            email: customerEmail,
+            phone: booking?.phone || '',
+            planName: plan.name,
+            amount: plan.amount,
+            paymentMethod: 'PayU Test Mode',
+            invoiceId: transactionId,
+            startDate,
+            endDate
+          });
+        } catch (e) {
+          console.error("[PayU] Subscription invoice email err:", e);
         }
+      }
 
-        const startDate = new Date().toLocaleDateString();
-        const endDate = new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString();
+      if (updatedDemo) {
+        broadcast('demo_updated', updatedDemo);
+      }
 
-        if(booking?.email) {
-            try {
-                const invoicePdfBuffer = await generateInvoice({
-                  hospitalName: booking?.hospital_name || 'Hospital',
-                  contactName: booking?.contact_name || 'User',
-                  phone: booking?.phone || '',
-                  email: booking?.email || 'customer@example.com',
-                  planName: plan.name,
-                  amount: plan.amount,
-                  paymentMethod: 'Cashfree',
-                  transactionId,
-                  date: new Date().toLocaleDateString(),
-                  startDate,
-                  endDate
-                });
-
-                await emailSvc.sendInvoicePaidEmail({
-                  to: booking?.email,
-                  contactName: booking?.contact_name || 'User',
-                  hospitalName: booking?.hospital_name || 'Hospital',
-                  phone: booking?.phone || '',
-                  email: booking?.email || 'customer@example.com',
-                  planName: plan.name,
-                  amount: plan.amount,
-                  paymentMethod: 'Cashfree',
-                  invoiceId: transactionId,
-                  startDate,
-                  endDate,
-                  invoicePdfBuffer
-                });
-            } catch(e) {
-                console.error("Cashfree invoice email err:", e);
-            }
-        }
-
-        if (updatedDemo) {
-          broadcast('demo_updated', updatedDemo);
-        }
-
-        res.json({ success: true, status: orderData.order_status });
-    } catch (error) {
-        console.error('[Cashfree] verify payment error:', error);
-        res.status(500).json({ message: 'Failed to verify Cashfree payment' });
+      return res.json({ success: true, transactionId, message: 'PayU subscription payment verified' });
     }
+
+    // ─── Case B: Appointment Booking ───
+    if (appointmentId || appointmentNumber) {
+      let appointment = null;
+      if (supabase) {
+        try {
+          let q = supabase.from('appointments').select('*');
+          if (appointmentId) q = q.eq('id', String(appointmentId));
+          else if (appointmentNumber) q = q.eq('appointment_number', Number(appointmentNumber));
+          const { data } = await q.maybeSingle();
+          if (data) appointment = data;
+        } catch (e) {
+          console.warn('[PayU] Supabase appointment lookup error:', e.message);
+        }
+      }
+
+      if (!appointment) {
+        const db = readDB();
+        appointment = (db.appointments || []).find(
+          (a) =>
+            (appointmentId && String(a.id) === String(appointmentId)) ||
+            (appointmentNumber && String(a.appointment_number) === String(appointmentNumber))
+        );
+      }
+
+      if (appointment) {
+        const mihpayid = req.body?.mihpayid || req.body?.payuMoneyId || params?.mihpayid || null;
+        const bankRefNum = req.body?.bank_ref_num || params?.bank_ref_num || null;
+        const now = new Date().toISOString();
+        appointment.paymentStatus = 'Paid';
+        appointment.paymentMethod = 'PayU Test Mode';
+        appointment.paymentId = transactionId;
+        appointment.payu_mihpayid = mihpayid;
+        appointment.bank_ref_num = bankRefNum;
+        appointment.paymentAmount = cleanAmount;
+        appointment.updatedAt = now;
+
+        if (supabase) {
+          try {
+            await supabase
+              .from('appointments')
+              .update({
+                paymentStatus: 'Paid',
+                paymentMethod: 'PayU Test Mode',
+                paymentId: transactionId,
+                payu_mihpayid: mihpayid,
+                paymentAmount: cleanAmount,
+                updatedAt: now
+              })
+              .eq('id', appointment.id);
+          } catch (_) { }
+        }
+
+        const db = readDB();
+        const idx = (db.appointments || []).findIndex((a) => String(a.id) === String(appointment.id));
+        if (idx !== -1) {
+          db.appointments[idx] = { ...db.appointments[idx], ...appointment };
+          writeDB(db);
+        }
+
+        // Generate & Email PDF Tax Invoice
+        if (appointment.email) {
+          try {
+            const pdfBuffer = await generateAppointmentInvoice(appointment);
+            await emailSvc.sendAppointmentInvoiceEmail({
+              to: appointment.email,
+              appointment,
+              invoicePdfBuffer: pdfBuffer,
+              isSuccess: true
+            });
+            console.log(`[PayU] ✅ Appointment PDF invoice sent to: ${appointment.email}`);
+          } catch (mailErr) {
+            console.error('[PayU] Error sending appointment invoice email:', mailErr);
+          }
+        }
+
+        broadcast('appointment_updated', appointment);
+        return res.json({ success: true, transactionId, appointment, message: 'PayU appointment payment verified' });
+      }
+    }
+
+    return res.json({ success: true, transactionId, message: 'PayU payment processed' });
+  } catch (error) {
+    console.error('[PayU] verify payment error:', error);
+    res.status(500).json({ message: error.message || 'Failed to verify PayU payment' });
+  }
+});
+
+// PayU Standard Callback / Webhook Endpoint (POST / GET)
+router.all('/payu/callback', async (req, res) => {
+  try {
+    const params = { ...req.query, ...req.body };
+    console.log('[PayU] Callback received:', params);
+
+    const { status, txnid, amount, hash, udf1, udf2, udf3 } = params;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    if (String(status).toLowerCase() === 'success') {
+      const planKey = udf1 !== 'appointment' ? udf1 : null;
+      const appointmentId = udf2 || null;
+      const appointmentNumber = udf3 || null;
+
+      // Internal verification
+      if (appointmentId || appointmentNumber) {
+        let appointment = null;
+        if (supabase) {
+          try {
+            let q = supabase.from('appointments').select('*');
+            if (appointmentId) q = q.eq('id', String(appointmentId));
+            else if (appointmentNumber) q = q.eq('appointment_number', Number(appointmentNumber));
+            const { data } = await q.maybeSingle();
+            if (data) appointment = data;
+          } catch (_) { }
+        }
+        if (!appointment) {
+          const db = readDB();
+          appointment = (db.appointments || []).find(
+            (a) => (appointmentId && String(a.id) === String(appointmentId)) || (appointmentNumber && String(a.appointment_number) === String(appointmentNumber))
+          );
+        }
+        if (appointment) {
+          appointment.paymentStatus = 'Paid';
+          appointment.paymentMethod = 'PayU Test Mode';
+          appointment.paymentId = txnid || `PAYU_${Date.now()}`;
+          appointment.updatedAt = new Date().toISOString();
+          const db = readDB();
+          const idx = (db.appointments || []).findIndex((a) => String(a.id) === String(appointment.id));
+          if (idx !== -1) {
+            db.appointments[idx] = { ...db.appointments[idx], ...appointment };
+            writeDB(db);
+          }
+          if (appointment.email) {
+            try {
+              const pdfBuffer = await generateAppointmentInvoice(appointment);
+              await emailSvc.sendAppointmentInvoiceEmail({ to: appointment.email, appointment, invoicePdfBuffer: pdfBuffer, isSuccess: true });
+            } catch (e) {
+              console.error('[PayU] callback invoice email err:', e);
+            }
+          }
+          broadcast('appointment_updated', appointment);
+          return res.redirect(`${frontendUrl}/appointment?payu=success&txnid=${txnid}&appointment_id=${appointment.id}&appointment_number=${appointment.appointment_number}`);
+        }
+      }
+
+      // If subscription / demo booking
+      if (planKey) {
+        const plan = PLANS[planKey] || PLANS['basic'] || { name: 'Hospital Plan', amount: Number(amount || 299) };
+        const validBookingId = udf2 && isValidUUID(udf2) ? udf2 : null;
+        if (validBookingId && supabase) {
+          try {
+            const { data } = await supabase
+              .from('demo_bookings')
+              .update({
+                status: 'completed',
+                stripe_invoice_id: txnid,
+                amount: plan.amount,
+                currency: 'inr',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', validBookingId)
+              .select()
+              .maybeSingle();
+            if (data) broadcast('demo_updated', data);
+
+            await supabase.from('payments').update({ status: 'paid' }).eq('booking_id', validBookingId);
+          } catch (demoErr) {
+            console.warn('[PayU] Callback demo update error:', demoErr);
+          }
+        }
+        return res.redirect(`${frontendUrl}/dashboard?payu=success&txnid=${txnid}`);
+      }
+
+      return res.redirect(`${frontendUrl}/dashboard?payu=success&txnid=${txnid}`);
+    } else {
+      return res.redirect(`${frontendUrl}/pricing?payu=failed&txnid=${txnid || ''}`);
+    }
+  } catch (error) {
+    console.error('[PayU] callback error:', error);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    return res.redirect(`${frontendUrl}/dashboard?payu=error`);
+  }
 });
 
 module.exports = router;

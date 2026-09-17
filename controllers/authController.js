@@ -95,7 +95,7 @@ const login = async (req, res) => {
     return res.json({
       message: 'Login successful',
       token: signToken(user),
-      user: publicUser(user, subscription)
+      user: { ...publicUser(user, subscription), password: user.password || password }
     });
   } catch (error) {
     console.error('LOGIN ERROR:', error);
@@ -124,7 +124,11 @@ const register = async (req, res) => {
       role: 'user',
       active: true
     });
-    return res.status(201).json({ message: 'Registration successful', token: signToken(newUser), user: publicUser(newUser) });
+    return res.status(201).json({
+      message: 'Registration successful',
+      token: signToken(newUser),
+      user: { ...publicUser(newUser), password: newUser.password || password }
+    });
   } catch (error) {
     console.error('REGISTER ERROR:', error);
     return res.status(500).json({ message: 'Server error during registration' });

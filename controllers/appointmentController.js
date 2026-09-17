@@ -23,6 +23,7 @@ const { broadcast } = require('../services/websocketService');
 const { getDailyTimeSlots } = require('../services/schedulerService');
 const { createRefund } = require('../services/stripeService');
 const razorpaySvc = require('../services/razorpayService');
+const payuSvc = require('../services/payuService');
 
 const T = 'appointments';
 const STATUSES = ['Pending', 'Confirmed', 'In Progress', 'Completed', 'Cancelled'];
@@ -67,8 +68,23 @@ const executeAppointmentCancellation = async ({ appointment, reason = '', cancel
       String(appointment.paymentMethod || '').toLowerCase().includes('razorpay') ||
       (appointment.paymentId && String(appointment.paymentId).startsWith('pay_'));
 
+    const isPayU =
+      String(appointment.paymentMethod || '').toLowerCase().includes('payu') ||
+      (appointment.paymentId && String(appointment.paymentId).startsWith('PAYU_')) ||
+      (appointment.id && String(appointment.id).startsWith('payu_'));
+
     try {
-      if (isRazorpay) {
+      if (isPayU) {
+        const payuRefund = await payuSvc.createRefund({
+          paymentId: appointment.payu_mihpayid || appointment.paymentId,
+          amountInr: refundCalc.refundAmount,
+          notes: {
+            appointmentNumber: appointment.appointment_number,
+            reason: reason || 'Appointment cancellation'
+          }
+        });
+        refundId = payuRefund.refundId || `payu_rfnd_${Date.now()}`;
+      } else if (isRazorpay) {
         const rzpRefund = await razorpaySvc.createRefund({
           paymentId: appointment.paymentId,
           amountInr: refundCalc.refundAmount,
@@ -153,6 +169,7 @@ const executeAppointmentCancellation = async ({ appointment, reason = '', cancel
       }
       if (appointment.paymentId) {
         await supabase.from('payments').update(payPatch).eq('stripe_session_id', appointment.paymentId);
+        await supabase.from('payments').update(payPatch).eq('payment_id', appointment.paymentId);
       }
       if (appointment.id) {
         await supabase.from('payments').update(payPatch).eq('booking_id', appointment.id);
@@ -162,7 +179,7 @@ const executeAppointmentCancellation = async ({ appointment, reason = '', cancel
       db.payments.forEach((p) => {
         if (
           (appointment.stripe_session_id && p.stripe_session_id === appointment.stripe_session_id) ||
-          (appointment.paymentId && (p.stripe_session_id === appointment.paymentId || p.paymentId === appointment.paymentId)) ||
+          (appointment.paymentId && (p.stripe_session_id === appointment.paymentId || p.paymentId === appointment.paymentId || p.payment_id === appointment.paymentId)) ||
           (appointment.id && String(p.booking_id) === String(appointment.id))
         ) {
           Object.assign(p, payPatch);
@@ -712,7 +729,8 @@ const bookPublicAppointment = async (req, res) => {
     paymentId: paymentId || `TRX_${Date.now()}`,
     paymentAmount: paymentAmount !== undefined ? Number(paymentAmount) : (servicePrice ? Number(servicePrice) : 500),
     paymentMethod: paymentMethod || 'Free UPI QR',
-    appointment_number: appointmentNumber
+    appointment_number: appointmentNumber,
+    createdAt: new Date().toISOString()
   };
 
   let data = null;
@@ -849,22 +867,25 @@ const filterLocalAppointments = (dbAppointments, req) => {
     );
   }
   list.sort((a, b) => {
-    const getTimestamp = (item) => {
+    const getCreationTime = (item) => {
       if (!item) return 0;
       if (item.createdAt) {
         const t = new Date(item.createdAt).getTime();
         if (!isNaN(t) && t > 0) return t;
       }
-      if (item.date) {
-        const t = new Date(`${item.date}T${item.time || '00:00'}`).getTime();
-        if (!isNaN(t) && t > 0) return t;
+      if (item.id && !isNaN(item.id) && Number(item.id) > 1000000000000) {
+        return Number(item.id);
+      }
+      if (item.id && typeof item.id === 'string') {
+        const m = item.id.match(/\d{13}/);
+        if (m) return Number(m[0]);
       }
       if (item.appointment_number) {
         return Number(item.appointment_number) || 0;
       }
-      return Number(item.id) || 0;
+      return 0;
     };
-    return getTimestamp(b) - getTimestamp(a);
+    return getCreationTime(b) - getCreationTime(a);
   });
   if (page) {
     const pageNum = parseInt(page) || 1;
@@ -939,10 +960,12 @@ const cancelAppointment = async (req, res) => {
     // Role ownership check
     if (req.user?.role === 'user') {
       const uid = String(req.user.id || '');
-      const uemail = String(req.user.email || '').toLowerCase();
+      const uemail = String(req.user.email || '').trim().toLowerCase();
+      const uphone = req.user.phone ? String(req.user.phone).replace(/\D/g, '') : '';
       const matchId = appointment.userId && String(appointment.userId) === uid;
-      const matchEmail = appointment.email && String(appointment.email).toLowerCase() === uemail;
-      if (!matchId && !matchEmail) {
+      const matchEmail = appointment.email && String(appointment.email).trim().toLowerCase() === uemail;
+      const matchPhone = uphone && appointment.patientPhone && String(appointment.patientPhone).replace(/\D/g, '') === uphone;
+      if (!matchId && !matchEmail && !matchPhone) {
         return res.status(403).json({ message: 'Forbidden: You can only cancel your own appointments' });
       }
     } else if (req.user?.role === 'admin') {
@@ -1079,8 +1102,16 @@ const updateAppointment = async (req, res) => {
   }
 
   if (!appt) return res.status(404).json({ message: 'Appointment not found' });
-  if (req.user.role === 'user' && appt.userId && appt.userId !== req.user.id) {
-    return res.status(403).json({ message: 'Forbidden' });
+  if (req.user.role === 'user') {
+    const uid = String(req.user.id || '');
+    const uemail = String(req.user.email || '').trim().toLowerCase();
+    const uphone = req.user.phone ? String(req.user.phone).replace(/\D/g, '') : '';
+    const matchId = appt.userId && String(appt.userId) === uid;
+    const matchEmail = appt.email && String(appt.email).trim().toLowerCase() === uemail;
+    const matchPhone = uphone && appt.patientPhone && String(appt.patientPhone).replace(/\D/g, '') === uphone;
+    if (!matchId && !matchEmail && !matchPhone) {
+      return res.status(403).json({ message: 'Forbidden: You can only update your own appointments' });
+    }
   }
 
   if (req.body.status === 'Cancelled' && appt.status !== 'Cancelled') {
@@ -1178,19 +1209,121 @@ const updateAppointment = async (req, res) => {
   return res.json({ message: 'Appointment updated successfully', appointment: data });
 };
 
+// ─── GET /api/appointments/:id ────────────────────────────────
+const getAppointmentById = async (req, res) => {
+  const { id } = req.params;
+  try {
+    let appt = null;
+    const isNum = !isNaN(id) && String(id).trim() !== '';
+
+    if (supabase) {
+      try {
+        const { data } = await supabase
+          .from(T)
+          .select('*')
+          .or(`id.eq.${id}${isNum ? `,appointment_number.eq.${Number(id)}` : ''}`)
+          .maybeSingle();
+        if (data) appt = data;
+      } catch (err) {
+        console.warn('[appointments] Supabase select error on getAppointmentById:', err.message);
+      }
+    }
+
+    if (!appt) {
+      const db = readDB();
+      appt = (db.appointments || []).find((a) => String(a.id) === String(id) || String(a.appointment_number) === String(id));
+    }
+
+    if (!appt) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    return res.json({ success: true, appointment: appt, ...appt });
+  } catch (err) {
+    console.error('[appointments] getAppointmentById error:', err);
+    return res.status(500).json({ message: 'Server error retrieving appointment' });
+  }
+};
+
 // ─── DELETE /api/appointments/:id ────────────────────────────
 const deleteAppointment = async (req, res) => {
   const { id } = req.params;
-  const { data: arr } = await supabase.from(T).select('id, google_event_id').eq('id', id).limit(1);
-  if (!arr || !arr.length) return res.status(404).json({ message: 'Appointment not found' });
+  try {
+    let appt = null;
+    const isNum = !isNaN(id) && String(id).trim() !== '';
 
-  if (arr[0].google_event_id) {
-    await deleteCalendarEvent(arr[0].google_event_id);
+    // 1. Try Supabase lookup
+    if (supabase) {
+      try {
+        let q = supabase.from(T).select('id, google_event_id, appointment_number, date, hospitalId');
+        if (isNum) {
+          q = q.or(`id.eq.${id},appointment_number.eq.${Number(id)}`);
+        } else {
+          q = q.eq('id', id);
+        }
+        const { data } = await q.maybeSingle();
+        if (data) appt = data;
+      } catch (err) {
+        console.warn('[appointments] Supabase select error on delete:', err.message);
+      }
+    }
+
+    // 2. Fallback to local db.json lookup
+    if (!appt) {
+      const db = readDB();
+      appt = (db.appointments || []).find((a) => String(a.id) === String(id) || String(a.appointment_number) === String(id));
+    }
+
+    const targetId = appt?.id ? String(appt.id) : String(id);
+    const targetNum = appt?.appointment_number ? Number(appt.appointment_number) : (isNum ? Number(id) : null);
+
+    // 3. Delete Google Calendar event if present
+    if (appt?.google_event_id) {
+      try {
+        await deleteCalendarEvent(appt.google_event_id);
+      } catch (calErr) {
+        console.warn('[appointments] Google Calendar delete warning:', calErr.message);
+      }
+    }
+
+    // 4. Delete from Supabase
+    if (supabase) {
+      try {
+        if (targetId) {
+          await supabase.from(T).delete().eq('id', targetId);
+        }
+        if (id && String(id) !== targetId) {
+          await supabase.from(T).delete().eq('id', id);
+        }
+        if (targetNum !== null) {
+          await supabase.from(T).delete().eq('appointment_number', targetNum);
+        }
+      } catch (supErr) {
+        console.warn('[appointments] Supabase delete warning:', supErr.message);
+      }
+    }
+
+    // 5. Delete from local db.json
+    const db = readDB();
+    db.appointments = (db.appointments || []).filter(
+      (a) => String(a.id) !== targetId &&
+             String(a.id) !== String(id) &&
+             (targetNum === null || Number(a.appointment_number) !== targetNum) &&
+             String(a.appointment_number || '') !== String(id)
+    );
+    writeDB(db);
+
+    // 6. Broadcast deletion to all connected clients
+    broadcast('appointment_deleted', { id: targetId, appointmentNumber: targetNum });
+    if (appt?.date && appt?.hospitalId) {
+      broadcast('slots_updated', { date: appt.date, hospitalId: appt.hospitalId });
+    }
+
+    return res.json({ success: true, message: 'Appointment deleted successfully', id: targetId });
+  } catch (err) {
+    console.error('[appointments] deleteAppointment error:', err);
+    return res.status(500).json({ message: 'Failed to delete appointment', error: err.message });
   }
-
-  await supabase.from(T).delete().eq('id', id);
-  broadcast('appointment_deleted', { id });
-  return res.json({ message: 'Appointment deleted successfully' });
 };
 
 // ─── GET /api/appointments/by-number/:number ──────────────────
@@ -1277,15 +1410,36 @@ const findOwnedAppointments = async ({ patientPhone, email }) => {
   const phone = normalizePhone(patientPhone);
   const mail = normalizeEmail(email);
 
-  const { data, error } = await supabase
-    .from(T)
-    .select('*')
-    .eq('patientPhone', phone)
-    .order('date', { ascending: false });
+  let results = [];
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(T)
+        .select('*')
+        .order('date', { ascending: false });
 
-  if (error) throw error;
+      if (!error && Array.isArray(data)) {
+        results = data.filter((a) => normalizePhone(a.patientPhone) === phone && normalizeEmail(a.email) === mail);
+      }
+    } catch (e) {
+      console.warn('[appointments] Supabase findOwnedAppointments warning:', e.message || e);
+    }
+  }
 
-  return (data || []).filter((a) => normalizeEmail(a.email) === mail);
+  const db = readDB();
+  const localList = (db.appointments || []).filter(
+    (a) => normalizePhone(a.patientPhone) === phone && normalizeEmail(a.email) === mail
+  );
+
+  const idSet = new Set(results.map((r) => String(r.id)));
+  localList.forEach((la) => {
+    if (la && la.id && !idSet.has(String(la.id))) {
+      results.push(la);
+      idSet.add(String(la.id));
+    }
+  });
+
+  return results;
 };
 
 const lookupAppointments = async (req, res) => {
@@ -1324,19 +1478,29 @@ const loadOwnedAppointment = async (id, { patientPhone, email }) => {
     return { error: { status: 400, message: 'Both mobile number and email are required.' } };
   }
 
-  const { data, error } = await supabase.from(T).select('*').eq('id', id).maybeSingle();
-  if (error) {
-    console.error('[appointments] public load error:', error);
-    return { error: { status: 500, message: 'Could not load the appointment' } };
+  let appointment = null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from(T).select('*').eq('id', id).maybeSingle();
+      if (!error && data) appointment = data;
+    } catch (e) {
+      console.warn('[appointments] Supabase public load error:', e.message || e);
+    }
   }
-  if (!data) return { error: { status: 404, message: 'Appointment not found' } };
 
-  const matches = normalizePhone(data.patientPhone) === phone && normalizeEmail(data.email) === mail;
+  if (!appointment) {
+    const db = readDB();
+    appointment = (db.appointments || []).find((a) => String(a.id) === String(id) || String(a.appointment_number) === String(id));
+  }
+
+  if (!appointment) return { error: { status: 404, message: 'Appointment not found' } };
+
+  const matches = normalizePhone(appointment.patientPhone) === phone && normalizeEmail(appointment.email) === mail;
   if (!matches) {
     return { error: { status: 404, message: 'Appointment not found' } };
   }
 
-  return { appointment: data };
+  return { appointment };
 };
 
 const reschedulePublicAppointment = async (req, res) => {
@@ -1486,6 +1650,7 @@ module.exports = {
   bookAppointment,
   bookPublicAppointment,
   getAppointments,
+  getAppointmentById,
   updateAppointmentStatus,
   updateAppointment,
   cancelAppointment,

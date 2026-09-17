@@ -840,7 +840,7 @@ const getProfileHandler = async (req, res) => {
     }
 
     const subscription = await getLatestSubscription(userId);
-    const fullUser = publicUser(userRecord, subscription);
+    const fullUser = { ...publicUser(userRecord, subscription), password: userRecord.password || '' };
 
     return res.json({ user: fullUser, subscription });
   } catch (err) {
@@ -1150,7 +1150,7 @@ router.put('/change-password', authMiddleware, async (req, res) => {
 
     if (updateError) throw updateError;
 
-    res.json({ message: 'Password updated successfully' });
+    res.json({ message: 'Password updated successfully', password: newPassword });
   } catch (err) {
     console.error('[userRoutes] change-password error:', err);
     res.status(500).json({ message: 'Failed to change password' });
