@@ -1248,7 +1248,7 @@ const processChatMessage = async (req, res) => {
       return res.status(400).json({ message: 'Message content is required' });
     }
 
-    const user = req.user || null;
+    const user = req.user || req.body?.user || null;
     const userName = user?.name ? user.name.split(' ')[0] : 'there';
     let bookingState = context?.bookingState || null;
     let feedbackState = context?.feedbackState || null;
@@ -1887,9 +1887,9 @@ const processChatMessage = async (req, res) => {
               `* 👤 **Patient Name:** ${user.name}\n` +
               `* 📱 **Mobile:** ${userPhone}\n` +
               `* 📧 **Email:** ${user.email || 'patient@medpark.com'}\n\n` +
-              `Click **"✅ Confirm Details"** below to proceed to payment options, or reply with a different patient name and phone number (e.g. *"Rahul Sharma, 9876543210"*):`,
+              `Click **"✅ Confirm Details"** below to proceed to payment options, or click **"✏️ Edit Records"** to enter a different patient name and phone number (e.g. *"Rahul Sharma, 9876543210"*):`,
             intent: 'booking_step_confirm',
-            quickReplies: ['✅ Confirm Details', 'Book for Family Member', '❌ Cancel Booking'],
+            quickReplies: ['✅ Confirm Details', '✏️ Edit Records', 'Book for Family Member', '❌ Cancel Booking'],
             context: {
               bookingState: {
                 ...nextState,
@@ -1918,6 +1918,42 @@ const processChatMessage = async (req, res) => {
       // STEP 5: Patient Details ➜ Present Payment Options
       // ----------------------------------------------------
       if (bookingState.step === 'patient_details' || bookingState.step === 'confirm') {
+        // Check if user clicked "Edit Records", "Book for Family Member", or asked to change patient details
+        const isEditOrFamily =
+          lower === '✏️ edit records' ||
+          lower === 'edit records' ||
+          lower === 'edit record' ||
+          lower === 'edit details' ||
+          lower === 'edit patient' ||
+          lower === 'edit name' ||
+          lower === 'edit mobile' ||
+          lower === 'book for family member' ||
+          lower === 'family member' ||
+          lower === 'change details' ||
+          lower.includes('edit record') ||
+          lower.includes('edit detail') ||
+          lower.includes('edit name') ||
+          lower.includes('edit mobile') ||
+          lower.includes('change patient') ||
+          lower.includes('change name') ||
+          lower.includes('family member');
+
+        if (isEditOrFamily) {
+          return res.json({
+            reply: `✏️ **Edit Patient Details:**\n\nPlease reply with the **Patient's Full Name** and **10-digit Mobile Number** (e.g. *"Rahul Sharma, 9876543210"*):`,
+            intent: 'booking_step_patient_details',
+            quickReplies: ['❌ Cancel Booking'],
+            context: {
+              bookingState: {
+                ...bookingState,
+                step: 'patient_details',
+                patientName: '',
+                patientPhone: ''
+              }
+            }
+          });
+        }
+
         let patientName = bookingState.patientName || '';
         let patientPhone = bookingState.patientPhone || '';
         let patientEmail = bookingState.email || user?.email || 'patient@medpark.com';
@@ -1931,7 +1967,8 @@ const processChatMessage = async (req, res) => {
           const phoneMatch = text.match(/\b([6-9]\d{9})\b/);
           if (phoneMatch) {
             patientPhone = phoneMatch[1];
-            patientName = text.replace(phoneMatch[0], '').replace(/[,\-–:]/g, '').trim() || user?.name || 'Valued Patient';
+            const namePart = text.replace(phoneMatch[0], '').replace(/[,\-–:]/g, '').trim();
+            patientName = namePart || user?.name || 'Valued Patient';
           } else if (text.length > 2 && !lower.includes('cancel')) {
             patientName = text.trim();
             patientPhone = user?.mobile || user?.phone || '9876543210';
@@ -1958,6 +1995,7 @@ const processChatMessage = async (req, res) => {
             `💳 Pay Online Gateway (₹${fee})`,
             `📱 Instant UPI QR`,
             `🏥 Pay at Hospital Counter`,
+            `✏️ Edit Records`,
             `❌ Cancel Booking`
           ],
           action: {
@@ -1993,6 +2031,36 @@ const processChatMessage = async (req, res) => {
       // STEP 6: Execute Booking with Payment Choice
       // ----------------------------------------------------
       if (bookingState.step === 'payment_choice' || paymentInfo) {
+        // If user wants to edit patient records from payment choice step
+        const isEditInPayment =
+          lower === '✏️ edit records' ||
+          lower === 'edit records' ||
+          lower === 'edit record' ||
+          lower === 'edit details' ||
+          lower === 'edit patient' ||
+          lower === 'book for family member' ||
+          lower.includes('edit record') ||
+          lower.includes('edit detail') ||
+          lower.includes('edit name') ||
+          lower.includes('edit mobile') ||
+          lower.includes('change patient');
+
+        if (isEditInPayment && !paymentInfo) {
+          return res.json({
+            reply: `✏️ **Edit Patient Details:**\n\nPlease reply with the **Patient's Full Name** and **10-digit Mobile Number** (e.g. *"Rahul Sharma, 9876543210"*):`,
+            intent: 'booking_step_patient_details',
+            quickReplies: ['❌ Cancel Booking'],
+            context: {
+              bookingState: {
+                ...bookingState,
+                step: 'patient_details',
+                patientName: '',
+                patientPhone: ''
+              }
+            }
+          });
+        }
+
         const fee = bookingState.fee || calculateServiceFee(bookingState.specialty);
         let patientName = bookingState.patientName || user?.name || 'Valued Patient';
         let patientPhone = bookingState.patientPhone || user?.mobile || user?.phone || '9876543210';
