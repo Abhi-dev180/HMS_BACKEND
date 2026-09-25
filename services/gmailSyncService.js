@@ -2,18 +2,28 @@ const { supabase } = require('../config/supabase');
 const { readDB, writeDB } = require('../models');
 const { uploadAttachmentToCloudinary } = require('./cloudinaryService');
 const { broadcast } = require('./websocketService');
+const { httpsFetch } = require('../utils/httpsFetch');
 
 const T = 'contacts';
 
-// Helper to acquire a fresh OAuth2 access token for Gmail API
+let cachedToken = null;
+let tokenExpiresAt = 0;
+let lastErrorLoggedTime = 0;
+let lastErrorMessage = '';
+
+// Helper to acquire a fresh OAuth2 access token for Gmail API (IPv4-safe & cached)
 const getAccessToken = async () => {
   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = process.env;
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) return null;
 
+  const now = Date.now();
+  if (cachedToken && tokenExpiresAt > now + 60000) {
+    return cachedToken;
+  }
+
   try {
-    const res = await fetch('https://oauth2.googleapis.com/token', {
+    const res = await httpsFetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
         client_secret: GOOGLE_CLIENT_SECRET,
@@ -21,11 +31,31 @@ const getAccessToken = async () => {
         grant_type: 'refresh_token'
       })
     });
-    if (!res.ok) return null;
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      if (now - lastErrorLoggedTime > 300000 || lastErrorMessage !== errText) {
+        console.warn(`[gmailSync] OAuth token response notice (${res.status}):`, errText);
+        lastErrorLoggedTime = now;
+        lastErrorMessage = errText;
+      }
+      return null;
+    }
+
     const data = await res.json();
-    return data.access_token;
+    if (data.access_token) {
+      cachedToken = data.access_token;
+      tokenExpiresAt = now + ((data.expires_in || 3600) * 1000);
+      lastErrorMessage = '';
+      return cachedToken;
+    }
+    return null;
   } catch (err) {
-    console.error('[gmailSync] OAuth token fetch error:', err.message);
+    if (now - lastErrorLoggedTime > 300000 || lastErrorMessage !== err.message) {
+      console.warn('[gmailSync] OAuth connection notice:', err.message, '(will retry in background)');
+      lastErrorLoggedTime = now;
+      lastErrorMessage = err.message;
+    }
     return null;
   }
 };
@@ -56,7 +86,7 @@ const syncIncomingGmailMessages = async () => {
 
     // List unread messages in INBOX received today onwards
     const startOfTodaySec = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000);
-    const listRes = await fetch(
+    const listRes = await httpsFetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread label:INBOX after:${startOfTodaySec}&maxResults=15`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
@@ -70,7 +100,7 @@ const syncIncomingGmailMessages = async () => {
 
     for (const msgItem of messages) {
       try {
-        const msgRes = await fetch(
+        const msgRes = await httpsFetch(
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
@@ -87,7 +117,7 @@ const syncIncomingGmailMessages = async () => {
         // Ignore messages sent by ourselves
         if (email.toLowerCase() === (process.env.GOOGLE_USER || '').toLowerCase()) {
           // Remove unread label so we don't keep checking
-          await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
+          await httpsFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ removeLabelIds: ['UNREAD'] })
@@ -102,7 +132,7 @@ const syncIncomingGmailMessages = async () => {
 
         if (msgDate < startOfToday) {
           console.log(`[gmailSync] ⏭️ Skipping older email from before today (${dateRaw})`);
-          await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
+          await httpsFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ removeLabelIds: ['UNREAD'] })
@@ -124,7 +154,7 @@ const syncIncomingGmailMessages = async () => {
             }
             if (part.filename && part.body && part.body.attachmentId) {
               try {
-                const attRes = await fetch(
+                const attRes = await httpsFetch(
                   `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/attachments/${part.body.attachmentId}`,
                   { headers: { Authorization: `Bearer ${accessToken}` } }
                 );
@@ -163,7 +193,7 @@ const syncIncomingGmailMessages = async () => {
         );
         if (isDeletedByAdmin) {
           console.log(`[gmailSync] ⏭️ Skipping deleted inquiry ${msgItem.id} from ${cleanEmail}`);
-          await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
+          await httpsFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ removeLabelIds: ['UNREAD'] })
@@ -178,7 +208,7 @@ const syncIncomingGmailMessages = async () => {
         );
         if (existsInDb) {
           console.log(`[gmailSync] ⏭️ Skipping duplicate inquiry for ${cleanEmail} ("${cleanSubject}")`);
-          await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
+          await httpsFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ removeLabelIds: ['UNREAD'] })
@@ -230,7 +260,7 @@ const syncIncomingGmailMessages = async () => {
         db.contacts.unshift(localRow);
         writeDB(db);
 
-        const savedRow = row;
+        const savedRow = localRow;
 
         // Broadcast Pub/Sub event so it pops up in Admin Dashboard in real-time
         const publicContact = {
@@ -253,7 +283,7 @@ const syncIncomingGmailMessages = async () => {
         broadcast('contact_created', publicContact);
 
         // Mark message as READ in Gmail so we don't duplicate
-        await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
+        await httpsFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgItem.id}/modify`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ removeLabelIds: ['UNREAD'] })

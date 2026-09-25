@@ -1,6 +1,7 @@
 
 const { supabase } = require('../config/supabase');
 const { readDB } = require('../models');
+const { httpsFetch } = require('../utils/httpsFetch');
 
 const GOOGLE_CALENDAR_API_KEY = process.env.GOOGLE_CALENDAR_API_KEY;
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || process.env.GOOGLE_USER || 'primary';
@@ -19,20 +20,26 @@ const formatTimeString = (t) => {
   return clean;
 };
 
+let cachedCalendarToken = null;
+let calendarTokenExpiresAt = 0;
+
 const getGoogleAccessToken = async () => {
   const refreshToken = process.env.GOOGLE_CALENDAR_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN;
   const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
 
   if (!clientId || !clientSecret || !refreshToken) {
-    console.warn('[googleCalendar] Missing Calendar credentials.');
     return null;
   }
 
+  const now = Date.now();
+  if (cachedCalendarToken && calendarTokenExpiresAt > now + 60000) {
+    return cachedCalendarToken;
+  }
+
   try {
-    const res = await fetch('https://oauth2.googleapis.com/token', {
+    const res = await httpsFetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
@@ -42,12 +49,16 @@ const getGoogleAccessToken = async () => {
     });
     if (res.ok) {
       const data = await res.json();
-      return data.access_token;
+      if (data.access_token) {
+        cachedCalendarToken = data.access_token;
+        calendarTokenExpiresAt = now + ((data.expires_in || 3600) * 1000);
+        return cachedCalendarToken;
+      }
     } else {
-      console.error('[googleCalendar] Token fetch failed:', await res.text());
+      console.warn('[googleCalendar] Token fetch notice:', res.statusText);
     }
   } catch (err) {
-    console.error('[googleCalendar] OAuth error:', err);
+    console.warn('[googleCalendar] OAuth fetch notice:', err.message);
   }
   return null;
 };
@@ -124,7 +135,7 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
     }
 
     if (url) {
-      const res = await fetch(url, { headers });
+      const res = await httpsFetch(url, { headers });
       if (res.ok) {
         const calData = await res.json();
         if (calData.items && Array.isArray(calData.items)) {
@@ -141,7 +152,7 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
                 });
                 bookedSlots.add(formatTimeString(hhmm));
               } catch (e) {
-                console.error('[googleCalendarService] parsing event time failed:', e);
+                console.warn('[googleCalendarService] parsing event time failed:', e.message);
               }
             }
           });
@@ -149,7 +160,7 @@ const getBookedSlotsForDate = async (dateStr, hospitalId) => {
       }
     }
   } catch (err) {
-    console.error('[googleCalendarService] Google Calendar API error:', err);
+    console.warn('[googleCalendarService] Calendar query notice:', err.message);
   }
 
   return Array.from(bookedSlots);
@@ -175,7 +186,7 @@ const createCalendarEvent = async ({
     attendees: attendees.map(email => ({ email }))
   };
 
-  const res = await fetch(
+  const res = await httpsFetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GOOGLE_CALENDAR_ID)}/events`,
     {
       method: 'POST',
@@ -195,7 +206,6 @@ const createCalendarEvent = async ({
 
   const data = await res.json();
   return data;
-  hangoutLink: data.hangoutLink  // contains id, htmlLink, etc.
 };
 
 // ─── Update a Google Calendar event ────────────────────────────
@@ -209,7 +219,7 @@ const updateCalendarEvent = async (eventId, { summary, description, start, end, 
   if (start) event.start = { dateTime: start, timeZone };
   if (end) event.end = { dateTime: end, timeZone };
 
-  const res = await fetch(
+  const res = await httpsFetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GOOGLE_CALENDAR_ID)}/events/${eventId}`,
     {
       method: 'PATCH',
@@ -236,7 +246,7 @@ const deleteCalendarEvent = async (eventId) => {
   const accessToken = await getGoogleAccessToken();
   if (!accessToken) throw new Error('Unable to get access token');
 
-  const res = await fetch(
+  const res = await httpsFetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GOOGLE_CALENDAR_ID)}/events/${eventId}`,
     {
       method: 'DELETE',

@@ -42,7 +42,9 @@ const saveSubscription = async ({
   stripeCustomerId,
   status,
   startDate,
+  start: startProp,
   expiryDate,
+  expiry: expiryProp,
   amount,
   currency,
   email,
@@ -70,9 +72,9 @@ const saveSubscription = async ({
   }
 
   const plan = PLANS[planKey];
-  const planType = plan?.interval || "monthly";
-  const start = startDate || new Date().toISOString();
-  const expiry = expiryDate || computeExpiry(start, plan || { interval: "month", interval_count: 1 });
+  const planType = plan?.interval || (planKey && planKey.includes('year') ? 'yearly' : planKey && planKey.includes('quarter') ? 'quarterly' : 'monthly');
+  const start = startDate || startProp || new Date().toISOString();
+  const expiry = expiryDate || expiryProp || computeExpiry(start, plan || { interval: (planKey && planKey.includes('year') ? 'year' : planKey && planKey.includes('quarter') ? 'quarter' : 'month'), interval_count: (planKey && planKey.includes('quarter') ? 3 : 1) });
 
   const crypto = require("crypto");
   const supaId = crypto.randomUUID();
@@ -98,9 +100,10 @@ const saveSubscription = async ({
   let savedSupabaseData = null;
   if (isSupabaseConfigured()) {
     try {
+      const { email: _email, ...supaSubRow } = subRow;
       const { data, error } = await supabase
         .from("subscriptions")
-        .upsert(subRow, { onConflict: "stripe_subscription_id" })
+        .upsert(supaSubRow, { onConflict: "stripe_subscription_id" })
         .select()
         .single();
       if (!error && data) savedSupabaseData = data;

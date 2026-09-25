@@ -143,15 +143,16 @@ const getMySubscriptions = async (req, res) => {
     let subscriptions = [];
     if (supabase) {
       try {
-        let q = supabase.from('subscriptions').select('*').order('created_at', { ascending: false });
-        if (userId) {
-          q = q.eq('user_id', userId);
-        } else if (userEmail) {
-          q = q.eq('email', userEmail);
+        let targetId = userId;
+        if (!targetId && userEmail) {
+          const { data: u } = await supabase.from('users').select('id').ilike('email', userEmail).maybeSingle();
+          if (u) targetId = u.id;
         }
-        const { data, error } = await q;
-        if (!error && Array.isArray(data)) {
-          subscriptions = data;
+        if (targetId) {
+          const { data, error } = await supabase.from('subscriptions').select('*').eq('user_id', targetId).order('created_at', { ascending: false });
+          if (!error && Array.isArray(data)) {
+            subscriptions = data;
+          }
         }
       } catch (e) {}
     }

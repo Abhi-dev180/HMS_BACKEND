@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { verifySession, verifyUpiPayment, webhook } = require('../controllers/paymentController');
+const { verifySession, verifyUpiPayment, webhook, saveSubscription, annotateUserWithSubscription } = require('../controllers/paymentController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const stripeSvc = require('../services/stripeService');
 const { supabase } = require('../config/supabase');
@@ -1037,6 +1037,93 @@ router.post('/payu/verify-payment', async (req, res) => {
       let updatedDemo = null;
       let validBookingId = booking?.id && isValidUUID(booking.id) ? booking.id : null;
 
+      const customerEmail = booking?.email || email;
+
+      // Find target user in DB by userId or email
+      const { readDB } = require('../models');
+      const db = readDB();
+      let targetUser = (db.users || []).find(
+        (u) =>
+          (customerEmail && u.email?.toLowerCase() === customerEmail?.toLowerCase()) ||
+          (booking?.contact_name && u.name === booking.contact_name)
+      );
+      let targetUserId = targetUser?.id || booking?.user_id || null;
+
+      if (!targetUserId && supabase && customerEmail) {
+        try {
+          const { data: supaU } = await supabase
+            .from('users')
+            .select('*')
+            .ilike('email', customerEmail)
+            .maybeSingle();
+          if (supaU) {
+            targetUserId = supaU.id;
+            targetUser = supaU;
+          }
+        } catch (_) {}
+      }
+
+      // Calculate future start and expiry dates based on planKey
+      const now = new Date();
+      const currentExp = targetUser?.plan_end || targetUser?.planEnd;
+      let baseDate = now;
+      if (currentExp) {
+        const parsedExp = new Date(currentExp);
+        if (!isNaN(parsedExp.getTime()) && parsedExp.getTime() > now.getTime()) {
+          baseDate = parsedExp;
+        }
+      }
+      const startIso = now.toISOString();
+      let expDate = new Date(baseDate);
+      const pk = (planKey || 'quarterly').toLowerCase();
+      if (pk.includes('month')) {
+        expDate.setDate(expDate.getDate() + 30);
+      } else if (pk.includes('year') || pk.includes('annual')) {
+        expDate.setDate(expDate.getDate() + 365);
+      } else {
+        expDate.setDate(expDate.getDate() + 90); // Quarterly
+      }
+      const expiryIso = expDate.toISOString();
+
+      // Save / Upsert subscription row
+      let savedSub = null;
+      try {
+        savedSub = await saveSubscription({
+          userId: targetUserId,
+          hospitalId: booking?.hospital_id || targetUser?.hospital_id || targetUser?.hospitalId || null,
+          planKey: planKey || 'quarterly',
+          planType: pk.includes('month') ? 'monthly' : pk.includes('year') ? 'yearly' : 'quarterly',
+          stripeSubscriptionId: transactionId,
+          stripeCustomerId: `payu_cust_${Date.now()}`,
+          status: 'active',
+          start: startIso,
+          startDate: startIso,
+          expiry: expiryIso,
+          expiryDate: expiryIso,
+          amount: plan.amount ? plan.amount * 100 : 2000000,
+          currency: 'inr',
+          email: customerEmail,
+        });
+      } catch (err) {
+        console.warn('[PayU] saveSubscription error:', err.message);
+      }
+
+      // Annotate user record with new active subscription
+      let updatedUser = null;
+      if (targetUserId) {
+        try {
+          updatedUser = await annotateUserWithSubscription({
+            userId: targetUserId,
+            planKey: planKey || 'quarterly',
+            startDate: startIso,
+            expiryDate: expiryIso,
+            status: 'active',
+          });
+        } catch (err) {
+          console.warn('[PayU] annotateUserWithSubscription error:', err.message);
+        }
+      }
+
       if (validBookingId) {
         const { data } = await supabase
           .from("demo_bookings")
@@ -1061,27 +1148,26 @@ router.post('/payu/verify-payment', async (req, res) => {
       if (!updatedPay || updatedPay.length === 0) {
         await supabase.from('payments').insert({
           booking_id: validBookingId,
-          email: booking?.email || email || 'customer@example.com',
+          email: customerEmail || 'customer@example.com',
           stripe_session_id: transactionId,
-          plan_key: planKey || 'basic',
+          plan_key: planKey || 'quarterly',
           amount: plan.amount,
           currency: 'inr',
           status: 'paid'
         });
       }
 
-      const startDate = new Date().toLocaleDateString();
-      const endDate = new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString();
+      const startDate = now.toLocaleDateString();
+      const endDate = expDate.toLocaleDateString();
 
-      const customerEmail = booking?.email || email;
       if (customerEmail) {
         try {
           const invoicePdfBuffer = await generateInvoice({
-            hospitalName: booking?.hospital_name || 'Hospital',
-            contactName: booking?.contact_name || firstname || 'User',
-            phone: booking?.phone || '',
+            hospitalName: booking?.hospital_name || targetUser?.hospital || targetUser?.hospital_name || 'MEDPARK Hospital',
+            contactName: booking?.contact_name || targetUser?.name || firstname || 'Hospital Administrator',
+            phone: booking?.phone || targetUser?.mobile || '',
             email: customerEmail,
-            planName: plan.name,
+            planName: plan.name || `${(planKey || 'quarterly').toUpperCase()} Plan`,
             amount: plan.amount,
             paymentMethod: 'PayU Test Mode',
             transactionId,
@@ -1092,11 +1178,11 @@ router.post('/payu/verify-payment', async (req, res) => {
 
           await emailSvc.sendInvoicePaidEmail({
             to: customerEmail,
-            contactName: booking?.contact_name || firstname || 'User',
-            hospitalName: booking?.hospital_name || 'Hospital',
-            phone: booking?.phone || '',
+            contactName: booking?.contact_name || targetUser?.name || firstname || 'Hospital Administrator',
+            hospitalName: booking?.hospital_name || targetUser?.hospital || targetUser?.hospital_name || 'MEDPARK Hospital',
+            phone: booking?.phone || targetUser?.mobile || '',
             email: customerEmail,
-            planName: plan.name,
+            planName: plan.name || `${(planKey || 'quarterly').toUpperCase()} Plan`,
             amount: plan.amount,
             paymentMethod: 'PayU Test Mode',
             invoiceId: transactionId,
@@ -1106,11 +1192,11 @@ router.post('/payu/verify-payment', async (req, res) => {
           });
 
           await emailSvc.sendPaymentReceivedToSuperAdmin({
-            hospitalName: booking?.hospital_name || 'Hospital',
-            contactName: booking?.contact_name || firstname || 'User',
+            hospitalName: booking?.hospital_name || targetUser?.hospital || targetUser?.hospital_name || 'MEDPARK Hospital',
+            contactName: booking?.contact_name || targetUser?.name || firstname || 'Hospital Administrator',
             email: customerEmail,
-            phone: booking?.phone || '',
-            planName: plan.name,
+            phone: booking?.phone || targetUser?.mobile || '',
+            planName: plan.name || `${(planKey || 'quarterly').toUpperCase()} Plan`,
             amount: plan.amount,
             paymentMethod: 'PayU Test Mode',
             invoiceId: transactionId,
@@ -1126,7 +1212,33 @@ router.post('/payu/verify-payment', async (req, res) => {
         broadcast('demo_updated', updatedDemo);
       }
 
-      return res.json({ success: true, transactionId, message: 'PayU subscription payment verified' });
+      return res.json({
+        success: true,
+        transactionId,
+        user: updatedUser || targetUser ? {
+          ...(targetUser || {}),
+          ...(updatedUser || {}),
+          plan_key: planKey || 'quarterly',
+          planKey: planKey || 'quarterly',
+          plan_start: startIso,
+          planStart: startIso,
+          plan_end: expiryIso,
+          planEnd: expiryIso,
+          isExpired: false,
+          subscription_status: 'active',
+          plan_status: 'active',
+          subscription: savedSub || {
+            plan_key: planKey || 'quarterly',
+            start_date: startIso,
+            expiry_date: expiryIso,
+            status: 'active',
+            amount: plan.amount
+          }
+        } : null,
+        subscription: savedSub,
+        expiryDate: expiryIso,
+        message: 'PayU subscription payment verified and plan activated'
+      });
     }
 
     // ─── Case B: Appointment Booking ───
