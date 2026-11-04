@@ -1207,6 +1207,39 @@ const profileUpdated = ({ name, email, changes, updatedAt }) => {
   };
 };
 
+
+// ─── Cancellation OTP Verification ───────────────────────────
+const cancellationOtp = ({ name, otp, appointmentNumber, hospitalName, date, time }) => ({
+  subject: `🔐 4-Digit OTP for Cancelling Appointment #${appointmentNumber || 'N/A'} - MEDPARK Hospital`,
+  html: shell({
+    heading: 'Appointment Cancellation Verification',
+    intro: `Hello ${name || 'Valued Patient'},`,
+    bodyHtml: `
+      <p style="margin:0 0 14px 0; font-size:15px; color:#334155;">
+        We received a request to cancel your appointment <strong>#${escapeHtml(appointmentNumber || 'N/A')}</strong>
+        ${hospitalName ? ` at <strong>${escapeHtml(hospitalName)}</strong>` : ''}
+        ${date ? ` scheduled on <strong>${escapeHtml(date)}</strong> at <strong>${escapeHtml(time || '')}</strong>` : ''}.
+      </p>
+      <p style="margin:0 0 16px 0; font-size:14px; color:#475569;">
+        To verify your identity and confirm this cancellation without logging in, please enter the 4-digit verification code below:
+      </p>
+      <div style="text-align:center;margin:28px 0;">
+        <div style="display:inline-block;background:#eff6ff;padding:18px 36px;border-radius:12px;font-size:38px;font-weight:800;letter-spacing:10px;color:#1e40af;border:2px dashed #93c5fd;">
+          ${escapeHtml(otp)}
+        </div>
+      </div>
+      <p style="margin:0;font-size:14px;color:#64748b;text-align:center;">This 4-digit OTP is valid for <strong>10 minutes</strong>.</p>
+      <div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:20px 0 0 0;">
+        <p style="margin:0;color:#92400e;font-size:13px;font-weight:500;">
+          ⚠️ <strong>Security Notice:</strong> If you did NOT request to cancel this appointment, please disregard this email. Your appointment will remain active and secure.
+        </p>
+      </div>
+    `,
+    footNote: 'MEDPARK Hospital Security • Automated One-Time Password Verification',
+    showQuote: false
+  })
+});
+
 // ─── OTP Verification ─────────────────────────────────────────
 const otpVerification = ({ name, otp }) => ({
   subject: 'Your OTP for email verification',
@@ -1259,7 +1292,8 @@ module.exports = {
   subscriptionExpired,
   appointmentFeedbackInvitation,
   profileUpdated,
-  otpVerification, 
+  otpVerification,
+  cancellationOtp, 
   invoicePaidEmail,
   paymentReceivedAdmin,
   appointmentInvoice,

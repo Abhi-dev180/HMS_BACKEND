@@ -500,6 +500,14 @@ const sendTestEmail = (to) =>
   });
 
 // ─── OTP Email ────────────────────────────────────────────────
+
+const sendCancellationOtp = ({ to, name, otp, appointmentNumber, hospitalName, date, time }) => {
+  return send({
+    to,
+    ...templates.cancellationOtp({ name, otp, appointmentNumber, hospitalName, date, time })
+  });
+};
+
 const sendOtpEmail = ({ to, name, otp }) => {
   return send({ to, ...templates.otpVerification({ name, otp }) });
 };
@@ -719,6 +727,7 @@ module.exports = {
   getSuperAdminEmail,
   sendTestEmail,
   sendOtpEmail,
+  sendCancellationOtp,
   profileUpdated: sendProfileUpdatedEmail,
   sendProfileUpdatedEmail,
   sendInvoicePaidEmail,

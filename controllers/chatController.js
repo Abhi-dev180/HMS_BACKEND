@@ -2,10 +2,21 @@
 const { supabase } = require('../config/supabase');
 const { readDB, writeDB } = require('../models');
 const { getDailyTimeSlots } = require('../services/schedulerService');
-const { sendAppointmentConfirmation } = require('../services/emailService');
+const { sendAppointmentConfirmation, sendCancellationOtp } = require('../services/emailService');
 const { generateAppointmentInvoice } = require('../services/invoiceService');
 const { broadcast } = require('../services/websocketService');
 const { executeAppointmentCancellation } = require('./appointmentController');
+const { generateChatResponse } = require('../services/geminiService');
+
+// ─── Helper: Mask email for privacy ──────────────────────────────
+const maskEmail = (email) => {
+  if (!email || typeof email !== 'string') return 'your registered Gmail';
+  const parts = email.trim().split('@');
+  if (parts.length !== 2) return email;
+  const [u, domain] = parts;
+  const visible = u.length <= 2 ? u.slice(0, 1) + '*' : u.slice(0, 2) + '*'.repeat(Math.max(1, u.length - 2));
+  return `${visible}@${domain}`;
+};
 
 // ─── Helper: generate unique 4-digit appointment number ──────
 const generateAppointmentNumber = async () => {
@@ -1540,7 +1551,7 @@ const processChatMessage = async (req, res) => {
     // ─────────────────────────────────────────────────────────────
     // IN-CHAT CONVERSATIONAL CANCELLATION FLOW
     // ─────────────────────────────────────────────────────────────
-    if (cancellationState && (lower === 'no' || lower === 'keep appointment' || lower === 'don\'t cancel' || lower === 'dont cancel' || lower === '❌ keep booking' || lower === 'stop')) {
+    if (cancellationState && (lower === 'no' || lower === 'keep appointment' || lower === 'don\'t cancel' || lower === 'dont cancel' || lower === '❌ keep booking' || lower === '❌ keep appointment' || lower === 'keep my bookings' || lower === 'stop' || lower === 'exit')) {
       return res.json({
         reply: `✅ Cancellation aborted. Your appointment **#${cancellationState.appointmentNumber}** remains active and confirmed!`,
         intent: 'cancellation_aborted',
@@ -1550,8 +1561,119 @@ const processChatMessage = async (req, res) => {
     }
 
     if (cancellationState) {
+      // Step A: Verifying 4-digit OTP for unauthenticated user
+      if (cancellationState.step === 'verify_otp') {
+        // Check if user requested resend OTP
+        if (lower.includes('resend') || lower === 'resend otp' || lower === 'send again') {
+          const newOtp = String(Math.floor(1000 + Math.random() * 9000));
+          if (cancellationState.email) {
+            sendCancellationOtp({
+              to: cancellationState.email,
+              name: cancellationState.patientName,
+              otp: newOtp,
+              appointmentNumber: cancellationState.appointmentNumber,
+              hospitalName: cancellationState.hospital,
+              date: cancellationState.date,
+              time: cancellationState.time
+            }).catch(err => console.error('[chatController] Resend cancellation OTP error:', err));
+          }
+
+          return res.json({
+            reply: `🔄 **New 4-Digit OTP Sent!**\n\nA new 4-digit verification code has been emailed to **${maskEmail(cancellationState.email)}**.\n\nPlease enter the 4-digit OTP below to cancel appointment **#${cancellationState.appointmentNumber}**:`,
+            intent: 'cancellation_otp_resent',
+            quickReplies: ['🔄 Resend OTP', '❌ Keep Appointment'],
+            context: {
+              ...context,
+              cancellationState: {
+                ...cancellationState,
+                otp: newOtp,
+                otpExpiresAt: Date.now() + 10 * 60 * 1000
+              }
+            }
+          });
+        }
+
+        // Extract 4-digit numeric OTP from input
+        const otpMatch = text.match(/\b\d{4}\b/);
+        const enteredOtp = otpMatch ? otpMatch[0] : text.replace(/\D/g, '').slice(0, 4);
+
+        if (!enteredOtp || enteredOtp.length !== 4) {
+          return res.json({
+            reply: `⚠️ Please enter the **4-digit numeric OTP** sent to **${maskEmail(cancellationState.email)}** (e.g. *1234*), or click **"🔄 Resend OTP"**:`,
+            intent: 'cancellation_otp_invalid_format',
+            quickReplies: ['🔄 Resend OTP', '❌ Keep Appointment'],
+            context
+          });
+        }
+
+        if (Date.now() > (cancellationState.otpExpiresAt || 0)) {
+          return res.json({
+            reply: `⏱️ **OTP has expired.** For your security, verification codes expire after 10 minutes.\n\nClick **"🔄 Resend OTP"** below to receive a new 4-digit OTP:`,
+            intent: 'cancellation_otp_expired',
+            quickReplies: ['🔄 Resend OTP', '❌ Keep Appointment'],
+            context
+          });
+        }
+
+        if (enteredOtp !== String(cancellationState.otp)) {
+          return res.json({
+            reply: `❌ **Incorrect 4-Digit OTP.** The code you entered ("${enteredOtp}") did not match the OTP sent to **${maskEmail(cancellationState.email)}**.\n\nPlease check your Gmail and enter the correct 4-digit OTP, or click **"🔄 Resend OTP"**:`,
+            intent: 'cancellation_otp_mismatch',
+            quickReplies: ['🔄 Resend OTP', '❌ Keep Appointment'],
+            context
+          });
+        }
+
+        // OTP Verified Successfully! Execute cancellation
+        const reasonText = 'Cancelled by patient via chatbot (Verified with 4-Digit Gmail OTP)';
+        const appt = await findAppointmentByNumber(cancellationState.appointmentNumber) || {
+          id: cancellationState.appointmentId,
+          appointment_number: cancellationState.appointmentNumber,
+          patientName: cancellationState.patientName,
+          hospital: cancellationState.hospital,
+          doctorName: cancellationState.doctorName,
+          date: cancellationState.date,
+          time: cancellationState.time,
+          paymentAmount: cancellationState.paymentAmount,
+          paymentStatus: 'Paid'
+        };
+
+        let cancelledResult = null;
+        try {
+          cancelledResult = await executeAppointmentCancellation({
+            appointment: appt,
+            reason: reasonText,
+            cancelledBy: 'patient_chatbot_unauthenticated_otp'
+          });
+        } catch (err) {
+          console.error('[chatbot] executeAppointmentCancellation error:', err);
+        }
+
+        const refundAmt = cancelledResult?.refundAmount || cancellationState.paymentAmount || 500;
+
+        return res.json({
+          reply: `✅ **OTP Verified Successfully!**\n\n` +
+            `❌ **Appointment #${cancellationState.appointmentNumber} Cancelled Successfully**\n\n` +
+            `* 👤 **Patient Name:** ${cancellationState.patientName}\n` +
+            `* 🏥 **Hospital:** ${cancellationState.hospital}\n` +
+            `* 🩺 **Doctor:** ${cancellationState.doctorName}\n` +
+            `* 📅 **Slot:** ${cancellationState.date} @ ${cancellationState.time}\n` +
+            `* 💰 **Refund Amount:** **₹${refundAmt}** (Status: **Refund Initiated**)\n` +
+            `* ℹ️ **Cancellation Reason:** *${reasonText}*\n\n` +
+            `💳 *Your refund has been initiated to your original payment method and will reflect within 2–4 business days. A cancellation receipt has been emailed to ${maskEmail(cancellationState.email)}.* How else may I assist you today?`,
+          intent: 'cancellation_success',
+          appointment: cancelledResult || { ...appt, status: 'Cancelled' },
+          quickReplies: ['Book New Appointment', 'Explore Lab Tests', 'Find Hospitals', 'Talk to Support'],
+          context: {
+            ...context,
+            cancellationState: null
+          }
+        });
+      }
+
+      // Step B: Authenticated / Logged-in user confirming reason (OTP skipped)
       if (cancellationState.step === 'confirm_reason') {
-        const reasonText = (text && !lower.includes('yes') && !lower.includes('confirm')) ? text : 'Cancelled by patient via chatbot';
+        const reasonText = (text && !lower.includes('yes') && !lower.includes('confirm')) ? text : 'Cancelled by authenticated patient via chatbot';
 
         const appt = await findAppointmentByNumber(cancellationState.appointmentNumber) || {
           id: cancellationState.appointmentId,
@@ -1570,7 +1692,7 @@ const processChatMessage = async (req, res) => {
           cancelledResult = await executeAppointmentCancellation({
             appointment: appt,
             reason: reasonText,
-            cancelledBy: 'patient_chatbot'
+            cancelledBy: 'patient_chatbot_authenticated'
           });
         } catch (err) {
           console.error('[chatbot] executeAppointmentCancellation error:', err);
@@ -1905,7 +2027,9 @@ const processChatMessage = async (req, res) => {
         return res.json({
           reply: `⏰ **Time Slot Selected:** **${cleanTime}**\n\n` +
             `👤 **Almost Done! Please provide Patient Details:**\n` +
-            `Please reply with the **Patient's Full Name** and **10-digit Mobile Number** (e.g. *"Amit Sharma, 9876543210"*):`,
+            `Please reply with the **Patient's Full Name**, **10-digit Mobile Number**, and **Gmail Address** (e.g. *"Amit Sharma, 9876543210, amit@gmail.com"*):\n\n` +
+            `> 📧 *Your Gmail is required to receive your booking confirmation, tax invoice, and the 4-digit OTP if you ever need to cancel without logging in.*\n\n` +
+            `*(If you already have an account, please log in to skip this step automatically).* `,
           intent: 'booking_step_patient_details',
           quickReplies: ['❌ Cancel Booking'],
           context: {
@@ -1956,24 +2080,63 @@ const processChatMessage = async (req, res) => {
 
         let patientName = bookingState.patientName || '';
         let patientPhone = bookingState.patientPhone || '';
-        let patientEmail = bookingState.email || user?.email || 'patient@medpark.com';
+        let patientEmail = bookingState.email || user?.email || '';
 
         // Check if user confirmed directly or provided new details
         if (lower.includes('confirm') || lower === 'yes' || lower === 'book now' || lower === '✅ confirm details' || lower === '✅ confirm booking') {
           if (!patientName) patientName = user?.name || 'Valued Patient';
           if (!patientPhone) patientPhone = user?.mobile || user?.phone || '9876543210';
+          if (!patientEmail) patientEmail = user?.email || 'patient@medpark.com';
         } else {
-          // Parse Name and Phone from text (e.g. "Amit Sharma, 9876543210" or "Rahul Verma 9876543210")
+          // Extract Email/Gmail from message
+          const emailMatch = text.match(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/);
+          if (emailMatch) {
+            patientEmail = emailMatch[1].toLowerCase();
+          }
+
+          // Extract Phone
           const phoneMatch = text.match(/\b([6-9]\d{9})\b/);
           if (phoneMatch) {
             patientPhone = phoneMatch[1];
-            const namePart = text.replace(phoneMatch[0], '').replace(/[,\-–:]/g, '').trim();
-            patientName = namePart || user?.name || 'Valued Patient';
-          } else if (text.length > 2 && !lower.includes('cancel')) {
-            patientName = text.trim();
-            patientPhone = user?.mobile || user?.phone || '9876543210';
+          }
+
+          // Extract Name
+          let namePart = text;
+          if (emailMatch) namePart = namePart.replace(emailMatch[0], '');
+          if (phoneMatch) namePart = namePart.replace(phoneMatch[0], '');
+          namePart = namePart.replace(/[,\-–:|]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (namePart && namePart.length > 1 && !lower.includes('confirm') && !lower.includes('cancel')) {
+            patientName = namePart;
           }
         }
+
+        // If user is NOT logged in and hasn't provided a Gmail/email address yet:
+        const isUserLoggedInBooking = Boolean(user && user.id && user.id !== 'guest' && user.email);
+        if (!isUserLoggedInBooking && !patientEmail && !bookingState.email) {
+          patientName = patientName || bookingState.patientName || 'Valued Patient';
+          patientPhone = patientPhone || bookingState.patientPhone || '9876543210';
+          return res.json({
+            reply: `👤 **Patient Details Recorded:**\n` +
+              `* 👤 **Patient Name:** ${patientName}\n` +
+              `* 📱 **Mobile Number:** ${patientPhone}\n\n` +
+              `📧 **Gmail Address Required:**\n` +
+              `Please reply with your **Gmail address** (e.g. *"amit@gmail.com"*).\n\n` +
+              `> 💡 *We require your Gmail to deliver your official booking invoice and the 4-digit OTP if you ever need to cancel this appointment.*\n` +
+              `*(If you already have an account, please log in to skip this step).* `,
+            intent: 'booking_step_patient_details',
+            quickReplies: ['❌ Cancel Booking'],
+            context: {
+              bookingState: {
+                ...bookingState,
+                step: 'patient_details',
+                patientName,
+                patientPhone
+              }
+            }
+          });
+        }
+
+        if (!patientEmail) patientEmail = user?.email || 'patient@medpark.com';
 
         const fee = calculateServiceFee(bookingState.specialty);
         const serviceTitle = bookingState.specialty || 'Doctor Consultation';
@@ -2769,27 +2932,77 @@ const processChatMessage = async (req, res) => {
         }
 
         const refundAmt = appt.paymentAmount || appt.servicePrice || 500;
+        const isUserLoggedIn = Boolean(user && user.id && user.id !== 'guest' && user.email);
+
+        // CASE 1: USER IS ALREADY LOGGED IN -> SKIP OTP PROCESS ENTIRELY
+        if (isUserLoggedIn) {
+          return res.json({
+            reply: `⚠️ **Confirm Cancellation for Appointment #${appt.appointment_number || appt.id}**\n\n` +
+              `* 👤 **Patient:** ${appt.patientName || 'Patient'}\n` +
+              `* 🏥 **Hospital:** ${appt.hospital || 'Hospital'}\n` +
+              `* 🩺 **Doctor / Service:** ${appt.doctorName || appt.serviceName || 'Consultation'}\n` +
+              `* 📅 **Slot:** **${appt.date}** @ ⏰ **${appt.time}**\n` +
+              `* 💰 **Eligible 100% Refund:** **₹${refundAmt}**\n\n` +
+              `ℹ️ *You are logged in as **${user.name || user.email}**, so identity OTP verification is skipped.* Are you sure you want to cancel?`,
+            intent: 'cancellation_confirm_prompt',
+            quickReplies: [
+              '✅ Yes, Cancel & Refund',
+              '❌ Keep Booking',
+              'Change of Mind',
+              'Emergency Came Up',
+              'Doctor Unavailable'
+            ],
+            context: {
+              ...context,
+              cancellationState: {
+                step: 'confirm_reason',
+                appointmentId: appt.id,
+                appointmentNumber: appt.appointment_number || appt.id,
+                patientName: appt.patientName,
+                hospital: appt.hospital,
+                doctorName: appt.doctorName || appt.serviceName || 'Consultation',
+                date: appt.date,
+                time: appt.time,
+                paymentAmount: refundAmt,
+                isLoggedIn: true
+              }
+            }
+          });
+        }
+
+        // CASE 2: USER IS NOT LOGGED IN -> SEND 4-DIGIT OTP TO REGISTERED GMAIL
+        const targetEmail = appt.email || '';
+        const otp = String(Math.floor(1000 + Math.random() * 9000));
+
+        if (targetEmail) {
+          sendCancellationOtp({
+            to: targetEmail,
+            name: appt.patientName,
+            otp,
+            appointmentNumber: appt.appointment_number || appt.id,
+            hospitalName: appt.hospital,
+            date: appt.date,
+            time: appt.time
+          }).catch(err => console.error('[chatController] Error sending cancellation OTP:', err));
+        }
 
         return res.json({
-          reply: `⚠️ **Confirm Cancellation for Appointment #${appt.appointment_number || appt.id}**\n\n` +
+          reply: `🔐 **Identity Verification Required (4-Digit OTP Sent)**\n\n` +
+            `To cancel appointment **#${appt.appointment_number || appt.id}** without logging in, a **4-digit verification OTP** has been sent to your registered Gmail address (**${maskEmail(targetEmail)}**).\n\n` +
             `* 👤 **Patient:** ${appt.patientName || 'Patient'}\n` +
             `* 🏥 **Hospital:** ${appt.hospital || 'Hospital'}\n` +
-            `* 🩺 **Doctor / Service:** ${appt.doctorName || appt.serviceName || 'Consultation'}\n` +
-            `* 📅 **Slot:** **${appt.date}** @ ⏰ **${appt.time}**\n` +
-            `* 💰 **Eligible 100% Refund:** **₹${refundAmt}**\n\n` +
-            `🛡️ *Full refund will be initiated back to your original payment method.* Are you sure you want to cancel?`,
-          intent: 'cancellation_confirm_prompt',
+            `* 📅 **Slot:** **${appt.date}** at ⏰ **${appt.time}**\n` +
+            `* 💰 **Eligible Refund:** **₹${refundAmt}**\n\n` +
+            `👉 Please reply with the **4-digit OTP** from your Gmail to verify your identity and confirm cancellation:`,
+          intent: 'cancellation_otp_prompt',
           quickReplies: [
-            '✅ Yes, Cancel & Refund',
-            '❌ Keep Booking',
-            'Change of Mind',
-            'Emergency Came Up',
-            'Doctor Unavailable'
+            '🔄 Resend OTP',
+            '❌ Keep Appointment'
           ],
           context: {
             ...context,
             cancellationState: {
-              step: 'confirm_reason',
+              step: 'verify_otp',
               appointmentId: appt.id,
               appointmentNumber: appt.appointment_number || appt.id,
               patientName: appt.patientName,
@@ -2797,7 +3010,11 @@ const processChatMessage = async (req, res) => {
               doctorName: appt.doctorName || appt.serviceName || 'Consultation',
               date: appt.date,
               time: appt.time,
-              paymentAmount: refundAmt
+              paymentAmount: refundAmt,
+              email: targetEmail,
+              otp,
+              otpExpiresAt: Date.now() + 10 * 60 * 1000,
+              isLoggedIn: false
             }
           }
         });
@@ -3563,8 +3780,34 @@ const processChatMessage = async (req, res) => {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 12. GENERAL AI / FALLBACK RESPONSES
+    // 12. GENERAL AI / FALLBACK RESPONSES (Powered by Google Gemini)
     // ─────────────────────────────────────────────────────────────
+    try {
+      const geminiResult = await generateChatResponse({
+        message: text,
+        history,
+        context
+      });
+
+      if (geminiResult && geminiResult.reply) {
+        return res.json({
+          reply: geminiResult.reply,
+          intent: 'gemini_ai_response',
+          source: 'gemini',
+          quickReplies: [
+            '🩺 Book Doctor Appointment',
+            '🧪 Lab Tests & Fasting Rules',
+            '🔍 Track My Appointment',
+            '🕒 Hospital Visiting Hours',
+            '💰 Doctor Consultation Fees',
+            '🚨 Emergency Helplines'
+          ]
+        });
+      }
+    } catch (geminiErr) {
+      console.warn('[chatController] Gemini generation error, using fallback:', geminiErr.message);
+    }
+
     return res.json({
       reply: `I understand you are asking about *"**${text.length > 50 ? text.slice(0, 50) + '...' : text}**"*. \n\n` +
         `Here is what I can help you with immediately:\n` +
