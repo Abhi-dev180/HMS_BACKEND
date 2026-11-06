@@ -5,8 +5,9 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const PREFERRED_MODELS = [
   'gemini-2.5-flash',
-  'gemini-flash-latest',
-  'gemini-2.5-flash-lite'
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-flash-latest'
 ];
 
 const SYSTEM_INSTRUCTION = `You are MediBot, the official 24/7 intelligent AI Hospital & Healthcare Assistant for MEDPARK Multi-Specialty Hospital Network.
