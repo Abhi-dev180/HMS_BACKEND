@@ -92,9 +92,75 @@ const login = async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const user = await Users.findByEmail(email);
+    let user = await Users.findByEmail(email);
+
+    // If user not found in Users, check if there's a registration record
+    if (!user) {
+      let reg = null;
+      if (supabase) {
+        try {
+          const { data } = await supabase
+            .from('registrations')
+            .select('*')
+            .ilike('email', email)
+            .limit(1);
+          if (data && data[0]) reg = data[0];
+        } catch (e) {}
+      }
+      if (!reg) {
+        const db = readDB();
+        reg = (db.registrations || []).find(r => (r.email || '').toLowerCase() === email.toLowerCase());
+      }
+
+      if (reg) {
+        const regPassword = (reg.password || '').toString().trim();
+        if (regPassword !== password) {
+          return res.status(401).json({ message: 'Invalid credentials. Please check your password.' });
+        }
+
+        // Auto-activate registration into users table if password matches
+        try {
+          const newUserPayload = {
+            name: reg.name || reg.contact_person || reg.hospital_name || 'Admin',
+            email: reg.email,
+            password: reg.password,
+            role: 'admin',
+            hospital_name: reg.hospital_name || '',
+            hospital: reg.hospital_name || '',
+            city: reg.city || '',
+            address: reg.address || '',
+            mobile: reg.mobile || reg.phone || '',
+            phone: reg.mobile || reg.phone || '',
+            status: 'active',
+            active: true,
+            plan_key: reg.plan_key || 'trial',
+            plan_status: 'active',
+            plan_start: new Date().toISOString(),
+            plan_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          };
+
+          if (supabase) {
+            const { data: created, error: createErr } = await supabase
+              .from('users')
+              .insert([newUserPayload])
+              .select('*')
+              .single();
+            if (!createErr && created) {
+              user = created;
+              await supabase.from('registrations').update({ status: 'approved' }).eq('id', reg.id);
+            }
+          }
+          if (!user) {
+            user = await Users.create(newUserPayload);
+          }
+        } catch (actErr) {
+          console.error('Failed to auto-activate registration:', actErr);
+        }
+      }
+    }
+
     if (!user || (user.password || '').toString().trim() !== password) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: 'Invalid credentials. Please check your email and password.' });
     }
     if (user.active === false) {
       return res.status(403).json({ message: 'Your account is inactive. Please contact support.' });
